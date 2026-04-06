@@ -14,13 +14,13 @@ select
     round(
         count(*) * 100.0 /
         sum(count(*)) over (
-            partition by date_trunc('week', c.called_at), c.lead_source
+            partition by date_trunc('week', c.called_at)::date, c.lead_source
         ), 1
     )                                        as pct_of_source
 from call_objections o
 join calls c on c.id = o.call_id
 where c.called_at is not null
-group by 1, 2, 3;
+group by date_trunc('week', c.called_at)::date, c.lead_source, o.objection_type;
 
 -- ── Rep performance summary (rolling 30 days) ─────────────────
 
