@@ -15,6 +15,13 @@ concurrency:
 permissions:
   contents: read
 
+# Opt into Node.js 24 runtime for JS-based actions. GitHub is deprecating
+# Node 20 on 2026-09-16; this silences the warning today and avoids a
+# scheduled breakage in June 2026. Safe to remove once all upstream actions
+# ship Node 24 natively.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   test:
     name: pytest
