@@ -3,7 +3,12 @@
 from celery import Celery
 from celery.schedules import crontab
 
+from app.observability import init_sentry
 from config import settings
+
+# Initialize Sentry at module load so both the worker and beat processes
+# capture errors from the very first task dispatch.
+init_sentry()
 
 celery_app = Celery(
     "sales_agent",

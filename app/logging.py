@@ -7,7 +7,12 @@ In production, logs are JSON for CloudWatch/Datadog/Loki ingestion.
 import logging
 import sys
 
-from pythonjsonlogger import jsonlogger
+try:
+    # python-json-logger >= 3.x
+    from pythonjsonlogger.json import JsonFormatter
+except ImportError:
+    # python-json-logger < 3.x fallback
+    from pythonjsonlogger.jsonlogger import JsonFormatter
 
 from config import settings
 
@@ -20,7 +25,7 @@ def configure_logging() -> None:
     handler = logging.StreamHandler(sys.stdout)
 
     if settings.is_production:
-        formatter = jsonlogger.JsonFormatter(
+        formatter = JsonFormatter(
             "%(asctime)s %(name)s %(levelname)s %(message)s",
             rename_fields={"asctime": "timestamp", "levelname": "level"},
         )

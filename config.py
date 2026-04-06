@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     weekly_report_day: str = "monday"
     weekly_report_hour: int = 8
 
+    # Observability (optional — empty DSN disables Sentry cleanly)
+    sentry_dsn: str | None = None
+    sentry_traces_sample_rate: float = 0.1
+    sentry_profiles_sample_rate: float = 0.0
+
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
