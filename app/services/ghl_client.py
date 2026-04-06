@@ -89,3 +89,39 @@ def _fetch_transcript_from_recording(recording_url: str) -> str | None:
     except Exception:
         logger.warning("Could not fetch transcript from recording URL: %s", recording_url, exc_info=True)
         return None
+
+
+# ── Contact fetch (lead enrichment) ───────────────────────────────────────────
+
+def get_contact(contact_id: str) -> dict[str, Any]:
+    """Fetch a contact record from GHL for lead enrichment."""
+    url = f"{GHL_BASE}/contacts/{contact_id}"
+    with httpx.Client(timeout=TIMEOUT) as client:
+        resp = client.get(url, headers=_headers())
+        resp.raise_for_status()
+        data = resp.json()
+        # GHL wraps under "contact" in some API versions
+        return data.get("contact", data)
+
+
+# ── Source normalization ─────────────────────────────────────────────────────
+
+_META_TOKENS = {"facebook", "fb", "instagram", "ig", "meta"}
+_GOOGLE_TOKENS = {"google", "goog", "adwords", "youtube", "yt"}
+
+
+def map_ghl_source(ghl_source: str) -> str:
+    """Normalize GHL's freeform source values to our lead_source enum.
+
+    Tokenizes on non-alphanumerics and matches whole tokens only. Substring
+    matching caused misclassifications (e.g. "campaign" contained "ig" and
+    was tagged as Meta). Whole-token matching is the correct semantics.
+    """
+    import re
+
+    tokens = set(re.findall(r"[a-z0-9]+", (ghl_source or "").lower()))
+    if tokens & _META_TOKENS:
+        return "meta"
+    if tokens & _GOOGLE_TOKENS:
+        return "google"
+    return "organic"
