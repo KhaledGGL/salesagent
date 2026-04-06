@@ -1,0 +1,41 @@
+# ── Environment ──────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ── Python ───────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ── Virtualenvs ──────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Test / lint caches ───────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── IDE ──────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# ── Logs ─────────────────────────────────────────────
+*.log
+logs/
+
+# ── Local data ───────────────────────────────────────
+*.sqlite
+*.db
+.claude/
