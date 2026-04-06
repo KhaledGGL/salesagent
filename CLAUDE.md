@@ -1,5 +1,9 @@
 # Sales Call Analyzer — Project Guide
 
+> **Current status lives in [`STATUS.md`](./STATUS.md).** Read that first for
+> what's done, what's pending, and how to resume. This file covers stable
+> conventions only.
+
 ## Stack
 - **API:** FastAPI (uvicorn)
 - **Task queue:** Celery with Redis broker
