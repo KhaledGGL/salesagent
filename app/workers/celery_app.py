@@ -1,6 +1,8 @@
-"""Celery application — broker and basic config."""
+"""Celery application — broker, worker config, and beat schedule."""
 
 from celery import Celery
+from celery.schedules import crontab
+
 from config import settings
 
 celery_app = Celery(
@@ -18,6 +20,35 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    # Auto-discover tasks inside app.workers
     imports=["app.workers.tasks"],
 )
+
+
+# ── Beat schedule ────────────────────────────────────────────────────────────
+# cron day-of-week: 0/7=Sunday, 1=Monday, ..., 6=Saturday
+_DAY_OF_WEEK_MAP = {
+    "sunday": 0,
+    "monday": 1,
+    "tuesday": 2,
+    "wednesday": 3,
+    "thursday": 4,
+    "friday": 5,
+    "saturday": 6,
+}
+
+
+def _day_to_cron(name: str) -> int:
+    """Translate 'monday' → 1, default to Monday on unknown input."""
+    return _DAY_OF_WEEK_MAP.get((name or "monday").lower(), 1)
+
+
+celery_app.conf.beat_schedule = {
+    "weekly-sales-report": {
+        "task": "generate_weekly_report",
+        "schedule": crontab(
+            hour=settings.weekly_report_hour,
+            minute=0,
+            day_of_week=_day_to_cron(settings.weekly_report_day),
+        ),
+    },
+}

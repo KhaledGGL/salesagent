@@ -13,6 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.core.report_blocks import build_weekly_fallback_text, build_weekly_report_blocks
 from app.core.slack_blocks import (
     build_coaching_moment_block,
     build_fallback_text,
@@ -402,3 +403,110 @@ def notify_scorecard(self, call_id: str) -> dict:
 
     logger.info("notify_scorecard complete: call_id=%s", call_id)
     return {"call_id": call_id, "status": "notified", "thread_ts": thread_ts}
+
+
+# ── Task: generate_weekly_report ─────────────────────────────────────────────
+
+@celery_app.task(
+    bind=True,
+    name="generate_weekly_report",
+    max_retries=3,
+    default_retry_delay=300,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=1800,
+)
+def generate_weekly_report(self) -> dict:
+    """Aggregate previous week's KPIs, snapshot to rep_kpi_snapshots,
+    and post a formatted report to Slack.
+
+    Triggered by Celery beat per WEEKLY_REPORT_DAY / WEEKLY_REPORT_HOUR.
+    Idempotent: replaying on the same week upserts snapshots and reposts
+    the Slack message (Slack itself doesn't dedupe — manual replay is
+    always explicit and cheap).
+    """
+    logger.info("generate_weekly_report started")
+    db = get_supabase()
+
+    # ── Read pre-aggregated views ────────────────────────────────────────
+    overview_resp = db.table("v_weekly_overview").select("*").execute()
+    overview_rows = overview_resp.data or []
+    overview = overview_rows[0] if overview_rows else {}
+
+    rep_perf = (
+        db.table("v_rep_performance_weekly").select("*").execute().data or []
+    )
+    top_objections = (
+        db.table("v_top_objections_weekly").select("*").limit(10).execute().data or []
+    )
+
+    week_start = overview.get("week_start") or ""
+    week_end = overview.get("week_end") or ""
+    total_calls = overview.get("total_calls") or 0
+
+    logger.info(
+        "Weekly data loaded: week=%s→%s total_calls=%d reps=%d objections=%d",
+        week_start, week_end, total_calls, len(rep_perf), len(top_objections),
+    )
+
+    # ── Upsert rep KPI snapshots (only if there's data) ─────────────────
+    if total_calls > 0 and week_start:
+        snapshot_rows = [
+            {
+                "rep_id": r["rep_id"],
+                "snapshot_date": week_start,
+                "period": "weekly",
+                "total_calls": r.get("total_calls") or 0,
+                "sold_calls": r.get("sold_calls") or 0,
+                "close_rate": r.get("close_rate_pct"),
+                "avg_overall_score": r.get("avg_overall_score"),
+                "avg_rapport": r.get("avg_rapport"),
+                "avg_diagnosis": r.get("avg_diagnosis"),
+                "avg_objection": r.get("avg_objection"),
+                "avg_close": r.get("avg_close"),
+                "avg_compliance": r.get("avg_compliance"),
+                "therapist_mode_count": r.get("therapist_mode_count") or 0,
+            }
+            for r in rep_perf
+            if (r.get("total_calls") or 0) > 0
+        ]
+        if snapshot_rows:
+            try:
+                # UNIQUE (rep_id, snapshot_date, period) allows upsert
+                db.table("rep_kpi_snapshots").upsert(
+                    snapshot_rows,
+                    on_conflict="rep_id,snapshot_date,period",
+                ).execute()
+                logger.info("Upserted %d KPI snapshots", len(snapshot_rows))
+            except Exception as exc:
+                # Don't let snapshot failures block the Slack post —
+                # the report itself is the user-facing deliverable.
+                logger.error("KPI snapshot upsert failed: %s", exc)
+
+    # ── Build and post Slack report ─────────────────────────────────────
+    blocks = build_weekly_report_blocks(
+        week_start=week_start,
+        week_end=week_end,
+        overview=overview,
+        rep_performance=rep_perf,
+        top_objections=top_objections,
+    )
+    fallback = build_weekly_fallback_text(
+        week_start=week_start,
+        total_calls=total_calls,
+        close_rate=overview.get("close_rate_pct"),
+    )
+
+    ts = post_message(
+        channel=settings.slack_reports_channel,
+        blocks=blocks,
+        text=fallback,
+    )
+    logger.info("Weekly report posted: ts=%s", ts)
+
+    return {
+        "week_start": str(week_start),
+        "total_calls": total_calls,
+        "reps_reported": len(rep_perf),
+        "ts": ts,
+    }
