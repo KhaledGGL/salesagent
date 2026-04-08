@@ -80,6 +80,57 @@ Rate handling_quality as:
 - overall score = weighted average: diagnosis (30%) + close (25%) + objection_handling (20%) + rapport (15%) + compliance (10%). Round to nearest integer.
 - ai_summary: 3–5 sentences. What happened, where it went wrong or right, and the single most important thing this rep should work on next.
 - If the transcript is too short (under 5 minutes) or clearly not a sales call, return: {"error": "reason"}
+
+## Required JSON Schema
+
+You MUST return a JSON object with EXACTLY this shape. Field names, nesting, and types are non-negotiable. Do not add extra top-level fields. Do not rename fields.
+
+```json
+{
+  "scores": {
+    "rapport": 7,
+    "diagnosis": 8,
+    "objection_handling": 6,
+    "close": 7,
+    "compliance": 9,
+    "overall": 7
+  },
+  "therapist_mode_flag": false,
+  "therapist_mode_reason": null,
+  "ai_summary": "Three to five sentences describing what happened and the single most important thing the rep should work on next.",
+  "win_loss_moment": {
+    "timestamp_seconds": 645,
+    "description": "The single most pivotal moment in the call — where it was won or lost. One sentence."
+  },
+  "coaching_moments": [
+    {
+      "timestamp_seconds": 320,
+      "category": "diagnosis",
+      "severity": "medium",
+      "note": "Specific observation with quoted or paraphrased dialogue. Keep to 1-2 sentences."
+    }
+  ],
+  "objections": [
+    {
+      "timestamp_seconds": 890,
+      "objection_type": "price",
+      "objection_text": "Quote of what the prospect actually said.",
+      "handling_quality": "good"
+    }
+  ]
+}
+```
+
+### Field constraints
+- `scores.*`: integers 1–10 inclusive. `overall` MUST be inside `scores`, not at the top level.
+- `therapist_mode_flag`: boolean. `therapist_mode_reason`: a SINGLE string (or null), not a list.
+- `win_loss_moment`: REQUIRED object with `timestamp_seconds` (int) and `description` (string).
+- `coaching_moments[*].category`: MUST be one of: "rapport", "diagnosis", "objection_handling", "close", "compliance".
+- `coaching_moments[*].severity`: MUST be one of: "low", "medium", "high".
+- `coaching_moments[*].note`: the field is named `note`, not `detail` or `description`.
+- `objections[*].objection_type`: MUST be one of: "price", "time", "spouse", "trust", "urgency", "competitor", "fear", "other".
+- `objections[*].objection_text`: the field is named `objection_text`, not `prospect_statement`. Quote what the prospect actually said.
+- `objections[*].handling_quality`: MUST be one of: "poor", "fair", "good", "excellent".
 """
 
 SCORING_USER_PROMPT = """

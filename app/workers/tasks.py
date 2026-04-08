@@ -97,30 +97,47 @@ def process_call(self, call_id: str, message_id: str) -> dict:
     try:
         _update_call(call_id, status="fetching")
 
-        # ── 2-step transcript fetch from GHL ─────────────────────────────
-        result = fetch_transcript(message_id)
-        transcript = result["transcript"]
-
-        if not transcript:
-            _update_call(
-                call_id,
-                status="failed",
-                error_message="No transcript returned from GHL",
-                recording_url=result.get("recording_url"),
-            )
-            logger.warning("No transcript for call_id=%s", call_id)
-            return {"call_id": call_id, "status": "failed", "reason": "no_transcript"}
-
-        # ── Lead enrichment: fetch contact and map fields ────────────────
-        call_row = (
+        # ── Detect inline-transcript fast path ───────────────────────────
+        # The /webhooks/ghl/transcript-ready endpoint inserts the call row
+        # with the transcript already populated. In that case we skip the
+        # GHL message fetch entirely and only do contact enrichment.
+        existing_row = (
             get_supabase()
             .table("calls")
-            .select("ghl_contact_id")
+            .select("transcript, ghl_contact_id")
             .eq("id", call_id)
             .single()
             .execute()
         )
-        contact_id = call_row.data["ghl_contact_id"]
+        existing_transcript = (existing_row.data or {}).get("transcript")
+        contact_id = (existing_row.data or {}).get("ghl_contact_id")
+
+        if existing_transcript:
+            logger.info(
+                "Inline transcript detected for call_id=%s (%d chars) — skipping GHL fetch",
+                call_id, len(existing_transcript),
+            )
+            transcript = existing_transcript
+            result: dict[str, Any] = {
+                "transcript": transcript,
+                "recording_url": None,
+                "duration_seconds": None,
+                "called_at": None,
+            }
+        else:
+            # ── 2-step transcript fetch from GHL ─────────────────────────
+            result = fetch_transcript(message_id)
+            transcript = result["transcript"]
+
+            if not transcript:
+                _update_call(
+                    call_id,
+                    status="failed",
+                    error_message="No transcript returned from GHL",
+                    recording_url=result.get("recording_url"),
+                )
+                logger.warning("No transcript for call_id=%s", call_id)
+                return {"call_id": call_id, "status": "failed", "reason": "no_transcript"}
 
         enrichment: dict[str, Any] = {}
         try:

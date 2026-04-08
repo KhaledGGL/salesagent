@@ -80,6 +80,30 @@ class GHLWebhookPayload(BaseModel):
     called_at: Optional[str] = None     # ISO timestamp
 
 
+class GHLTranscriptReadyPayload(BaseModel):
+    """Inline-transcript webhook from GHL's "Transcript Generated" trigger.
+
+    Unlike GHLWebhookPayload (which carries only metadata and forces a
+    follow-up GHL API call to fetch the transcript), this payload delivers
+    the transcript text directly. This eliminates one API round-trip and
+    sidesteps the race where "call ended" fires before transcription is done.
+
+    Field names mirror GHL's `transcript_generated.*` merge tag namespace
+    so the webhook body in the GHL workflow editor maps 1:1.
+    """
+    call_sid: str                       # used as ghl_message_id (Twilio call SID, globally unique)
+    call_user_id: str                   # rep's GHL user ID
+    call_transcript: str                # the actual dialogue text
+    call_duration: Optional[int] = None
+    call_status: Optional[str] = None   # we filter to "completed" only
+    call_from: Optional[str] = None     # phone number, not stored
+    call_to: Optional[str] = None       # phone number, not stored
+    contact_id: str
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+
+
 # ── Scorecard (Claude output) ─────────────────────────────────────────────────
 
 class ScoreBand(BaseModel):
