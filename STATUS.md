@@ -80,9 +80,10 @@ generate_weekly_report  (aggregates views → KPI snapshots → Slack)
 - `permissions: contents: read` (least privilege)
 - Node 24 runtime opt-in for upstream action deprecation
 
-### Database — bootstrapped ✅
+### Database — ⏳ NOT yet bootstrapped
 
-All three migrations applied against live Supabase:
+Migration files exist and are reviewed, but have NOT been applied to a
+live Supabase project. See Step 10a below.
 
 - `001_initial.sql` — enums, tables, indexes, triggers
 - `002_views.sql` — `v_rep_performance_30d`, `v_cold_warm_comparison`,
@@ -94,11 +95,26 @@ All three migrations applied against live Supabase:
 
 ## What's NOT done yet
 
-### External services (Step 10b) — ⏳ pending
+### Database bootstrap (Step 10a) — ⏳ pending
+
+The three SQL migrations have NOT been applied to a live Supabase project
+yet. Until this is done, nothing in the system can run against reality.
+
+1. Create Supabase project → https://supabase.com/dashboard → New project
+   (free tier, nearest region, save the DB password)
+2. Run the three migrations in order in Supabase SQL Editor:
+   - `migrations/001_initial.sql` — enums, tables, indexes, triggers
+   - `migrations/002_views.sql` — 30-day + objection views
+   - `migrations/003_weekly_views.sql` — weekly report views
+3. Capture from Settings → API:
+   - `SUPABASE_URL` (project URL)
+   - `SUPABASE_SERVICE_KEY` (service_role secret — NOT the anon key;
+     worker needs write access)
+
+### External services (Step 10b) — ⏳ blocked on 10a
 
 You need to create accounts and collect credentials for:
 
-- [ ] **Supabase project** — ✅ created, need to copy `SUPABASE_URL` + `SUPABASE_SERVICE_KEY` into `.env`
 - [ ] **GHL Private Integration** — scopes: `conversations.readonly`,
   `conversations/message.readonly`, `contacts.readonly`. Collect API key +
   Location ID. Webhook trigger configured but NOT YET ACTIVATED.

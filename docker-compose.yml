@@ -30,7 +30,7 @@ services:
   beat:
     build: .
     container_name: sales_beat
-    command: celery -A app.workers.celery_app beat --loglevel=info
+    command: celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     env_file:
       - .env
     depends_on:
