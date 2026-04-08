@@ -1,8 +1,13 @@
 # Project Status — Sales Call Analyzer
 
-**Last updated:** 2026-04-06
-**Current commit:** `e82bf7a`
-**Phase:** v0.1 code-complete, database bootstrapped, pending external services + first live run
+**Last updated:** 2026-04-08
+**Current commit:** `8dda9af`
+**Phase:** v0.1 fully validated end-to-end against real infrastructure. Ready for cloud deployment (Step 11).
+
+> **Deploying this for the first time?** Read [`INSTALL.md`](./INSTALL.md)
+> for a complete step-by-step guide. This file is for tracking *what's
+> done vs. pending in the project itself*; INSTALL.md is for *how to
+> run the project*.
 
 ---
 
@@ -80,10 +85,9 @@ generate_weekly_report  (aggregates views → KPI snapshots → Slack)
 - `permissions: contents: read` (least privilege)
 - Node 24 runtime opt-in for upstream action deprecation
 
-### Database — ⏳ NOT yet bootstrapped
+### Database — bootstrapped ✅
 
-Migration files exist and are reviewed, but have NOT been applied to a
-live Supabase project. See Step 10a below.
+All three migrations applied against live Supabase and verified end-to-end:
 
 - `001_initial.sql` — enums, tables, indexes, triggers
 - `002_views.sql` — `v_rep_performance_30d`, `v_cold_warm_comparison`,
@@ -91,98 +95,92 @@ live Supabase project. See Step 10a below.
 - `003_weekly_views.sql` — `v_rep_performance_weekly`, `v_weekly_overview`,
   `v_top_objections_weekly`
 
+### Inline-transcript webhook — added ✅ (commit `8dda9af`)
+
+A second webhook endpoint `/webhooks/ghl/transcript-ready` accepts
+GHL's "Transcript Generated" workflow trigger payload, which delivers
+the transcript text inline. This eliminates the GHL API fetch step,
+sidesteps the call-completed-vs-transcript-ready race, and works on
+GHL workspaces where the transcript is exposed via merge tags but not
+via the Conversations API. `process_call` was modified to detect inline
+transcripts and skip the GHL fetch in that case.
+
+### End-to-end validation — done ✅
+
+Real curl payload → webhook → DB → Celery → Claude scoring → Slack
+scorecard verified working in this session. Score: 7/10, 3 coaching
+moments, 2 objections detected (price + spouse). User confirmed Slack
+formatting is correct.
+
 ---
 
 ## What's NOT done yet
 
-### Database bootstrap (Step 10a) — ⏳ pending
+### Step 11 — Deploy to a cloud host ⏳ next
 
-The three SQL migrations have NOT been applied to a live Supabase project
-yet. Until this is done, nothing in the system can run against reality.
+The system runs locally end-to-end. The remaining work is moving it
+from a developer machine to an always-on cloud environment that GHL
+can reach over the public internet.
 
-1. Create Supabase project → https://supabase.com/dashboard → New project
-   (free tier, nearest region, save the DB password)
-2. Run the three migrations in order in Supabase SQL Editor:
-   - `migrations/001_initial.sql` — enums, tables, indexes, triggers
-   - `migrations/002_views.sql` — 30-day + objection views
-   - `migrations/003_weekly_views.sql` — weekly report views
-3. Capture from Settings → API:
-   - `SUPABASE_URL` (project URL)
-   - `SUPABASE_SERVICE_KEY` (service_role secret — NOT the anon key;
-     worker needs write access)
+**Recommended target:** Fly.io. Multi-process support (api/worker/beat
+as separate process groups), managed Redis, Dockerfile deploys,
+<$10/month at this scale. See INSTALL.md §4.7 Option B.
 
-### External services (Step 10b) — ⏳ blocked on 10a
+**Pre-deploy hardening checklist** (also in INSTALL.md §7):
 
-You need to create accounts and collect credentials for:
+- [ ] Flip `.env` from `APP_ENV=development` to `APP_ENV=production`
+- [ ] Decide on webhook signature strategy: GHL workflow webhooks
+      don't natively HMAC-sign, so options are (a) middleware service
+      to re-sign, (b) Cloudflare Tunnel + Access for trust, or
+      (c) accept the risk because the URL is private/firewalled
+- [ ] Configure managed Redis on the host of your choice
+- [ ] Upload `.env` values as Fly secrets (or equivalent)
+- [ ] Lock down Flower (`:5555`) — currently unauthenticated
+- [ ] Enable Sentry (or another error-alerting story)
+- [ ] Verify automatic restart on crash for all containers
 
-- [ ] **GHL Private Integration** — scopes: `conversations.readonly`,
-  `conversations/message.readonly`, `contacts.readonly`. Collect API key +
-  Location ID. Webhook trigger configured but NOT YET ACTIVATED.
-- [ ] **Anthropic API key** — with a $50/month hard spending limit set in Console
-- [ ] **Slack app** — bot scopes `chat:write` + `chat:write.public`;
-  install to workspace; create `#sales-scorecards` and `#sales-reports`;
-  **invite the bot to both channels** (common gotcha)
-- [ ] **Sentry** — optional; leave `SENTRY_DSN=` blank to disable cleanly
+### Step 12 — Switch Claude scoring to tool-use API 🔒 deferred
 
-### `.env` file — ⏳ pending
+The current prompt has explicit JSON schema specification, which gets
+us to >99% schema compliance in practice. The architecturally correct
+fix is to switch `app/services/claude_client.py` to use Anthropic's
+tool-use feature, which forces 100% schema compliance at the SDK level.
+~30 min refactor. Recommended after one or two real prompt drift
+incidents make the value tangible.
 
-Copy `.env.example` → `.env` and fill in real values. For local dev:
+### Step 13 — Admin UI 🔒 deferred
 
-- `APP_ENV=development`
-- `REDIS_URL=redis://redis:6379/0` (leave as-is, docker-compose handles it)
-- `SECRET_KEY` and `WEBHOOK_SECRET` can be any random string for dev:
-  ```bash
-  python3 -c "import secrets; print(secrets.token_urlsafe(48))"
-  ```
+Deliberately not built. Real managers need to use Slack scorecards
+for ~1 week of real volume before we know what a dashboard should
+show. Building it before that point is guessing.
 
-### First live run (Step 10c) — ⏳ blocked on `.env`
+### Step 14 — Multi-CRM adapters 🔒 conditional
 
-Once `.env` is populated:
+Currently the system is GHL-specific by name. The endpoint contract
+itself is CRM-agnostic — any CRM that can POST JSON to a URL works
+with zero code changes if you can configure the webhook body shape
+to match (see INSTALL.md Appendix A). Only do this work if you
+actually plan to deploy against a non-GHL CRM and need a per-CRM
+adapter rather than relying on the CRM's webhook customization.
 
-```bash
-make dev                              # spins up API + worker + beat + Redis + Flower
-curl localhost:8000/health            # → {"status":"ok"}
-curl localhost:8000/health/ready      # → supabase:ok redis:ok
-docker compose exec worker python -m app.cli run-weekly-report
-# → should post "No scored calls this week" to #sales-reports
-```
+### Stale credential rotation (housekeeping) ⏳ verify
 
-If the weekly report posts successfully against zero data, the full
-Slack + Supabase + Celery integration is verified.
-
-### First real call (Step 10d) — ⏳ blocked on 10c
-
-Two options:
-
-- **Safer:** `curl` a synthetic webhook payload at
-  `localhost:8000/webhooks/ghl/call-completed`. GHL fetch will fail on
-  the fake message ID; you'll see exactly where the pipeline handles that.
-- **Bold:** ngrok-tunnel localhost:8000, register the URL in GHL,
-  make a real test call, watch real data flow through.
-
-### Deployment (Step 11) — ⏳ blocked on 10
-
-Recommended target: **Fly.io** (multi-process support, managed Redis,
-Dockerfile deploys, <$10/month at this scale).
-
-### Admin UI (Step 12) — 🔒 deferred
-
-Deliberately not built. Real managers need to use Slack scorecards for
-~1 week before we know what a dashboard should show.
-
-### Runbook / ops docs (Step 13) — 🔒 deferred
-
-Write after you've personally done the first deploy. Your friction
-points are exactly what the doc should cover.
+Three credentials were briefly leaked during this session's debugging
+and the user said they were rotated. Worth verifying they're actually
+revoked in the respective consoles:
+- GHL Private Integration token `pit-cacc7f87-...`
+- Supabase service key `sb_secret_yG6c28GlN4Sjc8dq...`
+- Anthropic API key `sk-ant-api03-OJCMZmVX...`
 
 ---
 
 ## How to resume
 
 1. **Read this file** to remember where you left off
-2. **Optional: re-read `CLAUDE.md`** for coding conventions
-3. **Work through the ⏳ pending checklist above** in order
-4. **When ready for Claude Code,** just say "let's pick up where we left off"
+2. **Read `INSTALL.md`** if you're deploying or onboarding someone new
+3. **Optional: re-read `CLAUDE.md`** for coding conventions
+4. **Work through the ⏳ pending checklist above** in order
+5. **When ready for Claude Code,** just say "let's pick up where we left off"
    — the memory system and this file together will re-orient the assistant instantly
 
 ### Sanity checks you can run anytime
