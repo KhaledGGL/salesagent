@@ -44,6 +44,11 @@ schemas.py                 # Pydantic models & enums (mirror SQL enums)
 002_views.sql              # 30-day rolling + objection-tracking views
 003_weekly_views.sql       # Weekly report views
 tests/                     # 124 tests, ~2s runtime, zero external deps
+infra/
+  caddy/                   # Standalone Caddy reverse proxy for multi-agent
+                           # VPS deployments. Path-based routing under
+                           # api.<DOMAIN>; salesagent lives at /salesgrader/*.
+                           # See infra/caddy/README.md for host setup.
 INSTALL.md                 # Deployment guide (read for any first-time setup)
 STATUS.md                  # Current state, pending work, resume notes
 ```
@@ -60,7 +65,13 @@ STATUS.md                  # Current state, pending work, resume notes
   `if row is not None and row.data:` before accessing `.data`
 
 ## Running
+
+### Local dev (single agent, no proxy)
 ```bash
+# One-time on this host: create the shared `web` network the compose
+# file references (harmless even if you don't run Caddy)
+docker network create web
+
 make up                    # production-like (no hot-reload)
 make dev                   # dev overlay (hot-reload + APP_ENV=development)
 make test                  # 124 tests, ~2s
@@ -69,10 +80,16 @@ make test                  # 124 tests, ~2s
 docker compose restart worker beat
 ```
 
-Endpoints:
+### Multi-agent VPS (with Caddy)
+See `infra/caddy/README.md` for the full host setup. Salesagent's
+public URL becomes `https://api.<DOMAIN>/salesgrader/*` once Caddy
+is up.
+
+### Endpoints (local dev — bound to 127.0.0.1 only)
 - API: http://localhost:8000
 - Health: http://localhost:8000/health  +  /health/ready
 - Flower (Celery monitoring): http://localhost:5555
+- Redis: localhost:6379 (only reachable from the host itself)
 
 ## Webhook contract (current)
 

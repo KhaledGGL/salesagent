@@ -1,8 +1,8 @@
 # Project Status — Sales Call Analyzer
 
 **Last updated:** 2026-04-08
-**Current commit:** `8dda9af`
-**Phase:** v0.1 fully validated end-to-end against real infrastructure. Ready for cloud deployment (Step 11).
+**Current commit:** `f5e9791`
+**Phase:** v0.1 fully validated end-to-end + multi-agent VPS infrastructure ready. Awaiting first VPS deployment (Step 11).
 
 > **Deploying this for the first time?** Read [`INSTALL.md`](./INSTALL.md)
 > for a complete step-by-step guide. This file is for tracking *what's
@@ -112,32 +112,72 @@ scorecard verified working in this session. Score: 7/10, 3 coaching
 moments, 2 objections detected (price + spouse). User confirmed Slack
 formatting is correct.
 
+### Caddy reverse proxy infrastructure — added ✅ (commit `f5e9791`)
+
+`infra/caddy/` is a standalone Caddy reverse-proxy project that fronts
+every agent on the same VPS under a single hostname (`api.<DOMAIN>`)
+with **path-based routing**. Salesagent is wired up at `/salesgrader/*`;
+future agents (SDR, Sheets analyzer, etc.) drop in as additional
+`handle_path` blocks in the Caddyfile with no DNS or cert work.
+
+Salesagent's `docker-compose.yml` was updated to:
+- Join the shared external `web` Docker network for Caddy access
+- Bind host ports to `127.0.0.1` only (was `0.0.0.0`) so Redis, Flower,
+  and the API are unreachable from outside the host except via Caddy
+
+After VPS deploy, the GHL webhook URL becomes:
+```
+https://api.<DOMAIN>/salesgrader/webhooks/ghl/transcript-ready
+```
+
+See `infra/caddy/README.md` for the full host setup walkthrough.
+
 ---
 
 ## What's NOT done yet
 
-### Step 11 — Deploy to a cloud host ⏳ next
+### Step 11 — Deploy to the VPS ⏳ next
 
-The system runs locally end-to-end. The remaining work is moving it
-from a developer machine to an always-on cloud environment that GHL
-can reach over the public internet.
+The system runs locally end-to-end. The Caddy reverse proxy and
+multi-agent VPS layout are already wired up (commit `f5e9791`). The
+remaining work is moving it onto a real always-on server.
 
-**Recommended target:** Fly.io. Multi-process support (api/worker/beat
-as separate process groups), managed Redis, Dockerfile deploys,
-<$10/month at this scale. See INSTALL.md §4.7 Option B.
+**Target:** single VPS, multi-agent layout fronted by Caddy.
+See `infra/caddy/README.md` for the step-by-step host walkthrough.
 
-**Pre-deploy hardening checklist** (also in INSTALL.md §7):
+**Deploy checklist (in order):**
 
-- [ ] Flip `.env` from `APP_ENV=development` to `APP_ENV=production`
+- [ ] Provision a Linux VPS (Ubuntu 22.04+ or Debian 12+, 2 GB RAM
+      recommended for room to grow into multi-agent)
+- [ ] Install Docker + Docker Compose v2 on the VPS
+- [ ] `docker network create web` (one-time, before any compose stack)
+- [ ] `sudo ufw allow 80/tcp 443/tcp && sudo ufw enable`
+- [ ] Point DNS A record `api.<DOMAIN>` at the VPS's public IP
+- [ ] Wait for DNS propagation (`dig api.<DOMAIN>` to verify)
+- [ ] Copy `infra/caddy/` to `/srv/caddy/` on the VPS, populate `.env`
+- [ ] Copy salesagent project to `/srv/salesagent/` on the VPS
+- [ ] Populate `/srv/salesagent/.env` with all real values
+- [ ] Flip `APP_ENV=production` in the salesagent `.env`
+- [ ] `cd /srv/caddy && docker compose up -d` — verify cert issuance
+- [ ] `cd /srv/salesagent && docker compose up -d` — verify health
+- [ ] `curl https://api.<DOMAIN>/salesgrader/health/ready` — should
+      return `{"status":"ready","checks":{"supabase":"ok","redis":"ok"}}`
+- [ ] Update GHL workflow webhook URL to
+      `https://api.<DOMAIN>/salesgrader/webhooks/ghl/transcript-ready`
+- [ ] Make a real test call through GHL → verify scorecard lands in
+      `#sales-scorecards`
+
+**Pre-deploy hardening (still pending — do before exposing publicly):**
+
 - [ ] Decide on webhook signature strategy: GHL workflow webhooks
       don't natively HMAC-sign, so options are (a) middleware service
       to re-sign, (b) Cloudflare Tunnel + Access for trust, or
       (c) accept the risk because the URL is private/firewalled
-- [ ] Configure managed Redis on the host of your choice
-- [ ] Upload `.env` values as Fly secrets (or equivalent)
-- [ ] Lock down Flower (`:5555`) — currently unauthenticated
+- [ ] Lock down Flower behind Caddy basicauth (template in
+      `infra/caddy/README.md`) or remove the service entirely
 - [ ] Enable Sentry (or another error-alerting story)
-- [ ] Verify automatic restart on crash for all containers
+- [ ] Set up Anthropic spending alerts in the Console
+- [ ] Verify Supabase backups are enabled and test a restore once
 
 ### Step 12 — Switch Claude scoring to tool-use API 🔒 deferred
 
