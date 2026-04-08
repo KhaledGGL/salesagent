@@ -1,0 +1,74 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Caddy reverse proxy — multi-agent path-based routing
+#
+# This Caddyfile fronts every backend agent on the same VPS under a single
+# hostname (api.<DOMAIN>) with path-based routing. Each agent gets a path
+# prefix; Caddy strips the prefix before forwarding so the backend apps
+# don't need to know about it.
+#
+# DNS: point an A record for api.<DOMAIN> at this VPS's public IP.
+# TLS: Caddy automatically obtains and renews Let's Encrypt certs.
+#
+# To add a new agent:
+#   1. Stand it up in its own docker-compose project, joined to the
+#      `web` external network (see infra/caddy/README.md)
+#   2. Add a `handle_path` block below pointing at its container name + port
+#   3. `docker compose -f infra/caddy/docker-compose.yml restart caddy`
+# ─────────────────────────────────────────────────────────────────────────────
+{
+	# Global options
+	email {$ACME_EMAIL}
+
+	# Comment the next two lines OUT for real production. They use the
+	# Let's Encrypt staging environment so you don't burn the production
+	# rate limit during DNS/setup testing.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+# ─── Public API hostname ─────────────────────────────────────────────────────
+api.{$DOMAIN} {
+	# Security headers for all responses
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# Hide Caddy's identity
+		-Server
+	}
+
+	# ── Sales Call Analyzer ──────────────────────────────────────────────
+	# Webhook URL given to GHL workflow:
+	#   https://api.<DOMAIN>/salesgrader/webhooks/ghl/transcript-ready
+	# Health check from outside:
+	#   https://api.<DOMAIN>/salesgrader/health/ready
+	handle_path /salesgrader/* {
+		# Caddy already forwards X-Forwarded-For and X-Forwarded-Proto by
+		# default. We only set X-Real-IP explicitly for backends that look
+		# for that specific header.
+		reverse_proxy sales_api:8000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+
+	# ── Future agents — uncomment and adapt as you add them ──────────────
+	#
+	# handle_path /sdr/* {
+	#     reverse_proxy sdr_api:8000 {
+	#         header_up X-Real-IP {remote_host}
+	#     }
+	# }
+	#
+	# handle_path /sheets/* {
+	#     reverse_proxy sheets_api:8000 {
+	#         header_up X-Real-IP {remote_host}
+	#     }
+	# }
+
+	# ── Default response at the root path ────────────────────────────────
+	# Hitting api.<DOMAIN>/ directly returns a small OK so you can verify
+	# Caddy is alive without authenticating into any specific agent.
+	handle {
+		respond "Caddy reverse proxy OK. Use /<agent>/<path> to reach a service." 200
+	}
+}

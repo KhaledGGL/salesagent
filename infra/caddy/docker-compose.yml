@@ -1,0 +1,53 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Caddy reverse proxy — shared across all agents on this VPS.
+#
+# Standalone docker-compose project. Run independently of any agent:
+#   cd infra/caddy
+#   docker compose up -d
+#
+# Caddy reaches each agent's container via the shared external Docker network
+# named `web`. You must create that network ONCE on the host BEFORE bringing
+# this stack up:
+#   docker network create web
+#
+# Each agent's docker-compose.yml must also declare `web` as an external
+# network and attach its public-facing service to it.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy_proxy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3 (QUIC) — optional but free perf win
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data       # certs, ACME state — DO NOT delete on reset
+      - caddy_config:/config   # Caddy's runtime config cache
+    env_file:
+      - .env
+    networks:
+      - web
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  # Pre-existing external network shared with all agents on this host.
+  # Create with: docker network create web
+  web:
+    name: web
+    external: true
+
+volumes:
+  # Persist Let's Encrypt certificates across container restarts.
+  # Losing this volume means re-issuing certs (and possibly hitting LE rate
+  # limits). Back it up if you're paranoid.
+  caddy_data:
+  caddy_config:
