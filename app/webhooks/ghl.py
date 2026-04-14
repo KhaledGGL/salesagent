@@ -3,6 +3,7 @@
 import hashlib
 import hmac
 import logging
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
@@ -335,6 +336,7 @@ async def ghl_transcript_ready(
             "lead_name": payload.contact_name,
             "transcript": transcript,
             "duration_seconds": payload.call_duration,
+            "called_at": datetime.now(timezone.utc).isoformat(),
             "status": "received",
         })
         .execute()
