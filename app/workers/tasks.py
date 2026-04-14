@@ -13,6 +13,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from app.core.coaching_blocks import build_coaching_fallback_text, build_coaching_lesson_blocks
+from app.core.marketing_blocks import build_marketing_fallback_text, build_marketing_intel_blocks
 from app.core.report_blocks import build_weekly_fallback_text, build_weekly_report_blocks
 from app.core.slack_blocks import (
     build_coaching_moment_block,
@@ -21,7 +23,12 @@ from app.core.slack_blocks import (
     build_scorecard_blocks,
 )
 from app.db import get_supabase
-from app.services.claude_client import TranscriptTooShortError, score_transcript
+from app.services.claude_client import (
+    TranscriptTooShortError,
+    generate_coaching_lesson,
+    generate_marketing_intel,
+    score_transcript,
+)
 from app.services.ghl_client import fetch_transcript, get_contact, map_ghl_source
 from app.services.slack_client import post_message
 from app.workers.celery_app import celery_app
@@ -525,5 +532,182 @@ def generate_weekly_report(self) -> dict:
         "week_start": str(week_start),
         "total_calls": total_calls,
         "reps_reported": len(rep_perf),
+        "ts": ts,
+    }
+
+
+# ── Task: generate_coaching_lesson ─────────────────────────────────────────
+
+@celery_app.task(
+    bind=True,
+    name="generate_coaching_lesson",
+    max_retries=3,
+    default_retry_delay=300,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=1800,
+)
+def generate_coaching_lesson_task(self) -> dict:
+    """Pull the week's coaching moments, send to Claude for synthesis,
+    and post a coaching lesson to Slack.
+
+    Runs 5 minutes after the weekly report via Celery beat.
+    """
+    import json as _json
+
+    logger.info("generate_coaching_lesson started")
+    db = get_supabase()
+
+    # ── Read data ───────────────────────────────────────────────────────
+    overview_resp = db.table("v_weekly_overview").select("*").execute()
+    overview_rows = overview_resp.data or []
+    overview = overview_rows[0] if overview_rows else {}
+
+    total_calls = overview.get("total_calls") or 0
+    week_start = overview.get("week_start") or ""
+    week_end = overview.get("week_end") or ""
+
+    if total_calls == 0:
+        logger.info("No calls last week — skipping coaching lesson")
+        return {"week_start": str(week_start), "total_calls": 0, "status": "skipped"}
+
+    moments = (
+        db.table("v_weekly_coaching_moments").select("*").execute().data or []
+    )
+
+    if not moments:
+        logger.info("No coaching moments last week — skipping coaching lesson")
+        return {"week_start": str(week_start), "total_calls": total_calls, "status": "skipped"}
+
+    # ── Group by category ───────────────────────────────────────────────
+    by_category: dict[str, list[dict]] = {}
+    for m in moments:
+        cat = m.get("category", "other")
+        by_category.setdefault(cat, []).append(m)
+
+    moments_json = _json.dumps(by_category, indent=2, default=str)
+    avg_score = overview.get("avg_overall_score") or 0
+
+    # ── Call Claude ─────────────────────────────────────────────────────
+    lesson = generate_coaching_lesson(
+        coaching_moments_json=moments_json,
+        week_start=str(week_start),
+        week_end=str(week_end),
+        total_calls=total_calls,
+        avg_score=float(avg_score),
+    )
+
+    # ── Post to Slack ──────────────────────────────────────────────────
+    blocks = build_coaching_lesson_blocks(
+        week_start=str(week_start),
+        week_end=str(week_end),
+        lesson=lesson,
+    )
+    fallback = build_coaching_fallback_text(
+        week_start=str(week_start),
+        total_calls=total_calls,
+    )
+
+    ts = post_message(
+        channel=settings.slack_reports_channel,
+        blocks=blocks,
+        text=fallback,
+    )
+    logger.info("Coaching lesson posted: ts=%s", ts)
+
+    return {
+        "week_start": str(week_start),
+        "total_calls": total_calls,
+        "categories": len(by_category),
+        "ts": ts,
+    }
+
+
+# ── Task: generate_marketing_intel ─────────────────────────────────────────
+
+@celery_app.task(
+    bind=True,
+    name="generate_marketing_intel",
+    max_retries=3,
+    default_retry_delay=300,
+    autoretry_for=(Exception,),
+    retry_backoff=True,
+    retry_backoff_max=1800,
+)
+def generate_marketing_intel_task(self) -> dict:
+    """Pull the week's sales data, send to Claude for marketing analysis,
+    and post intelligence to Slack.
+
+    Runs 10 minutes after the weekly report via Celery beat.
+    """
+    import json as _json
+
+    logger.info("generate_marketing_intel started")
+    db = get_supabase()
+
+    # ── Read data ───────────────────────────────────────────────────────
+    overview_resp = db.table("v_weekly_overview").select("*").execute()
+    overview_rows = overview_resp.data or []
+    overview = overview_rows[0] if overview_rows else {}
+
+    total_calls = overview.get("total_calls") or 0
+    week_start = overview.get("week_start") or ""
+    week_end = overview.get("week_end") or ""
+
+    if total_calls == 0:
+        logger.info("No calls last week — skipping marketing intel")
+        return {"week_start": str(week_start), "total_calls": 0, "status": "skipped"}
+
+    # Objections with context
+    objections = (
+        db.table("v_top_objections_weekly").select("*").execute().data or []
+    )
+
+    # AI summaries
+    summaries = (
+        db.table("v_weekly_ai_summaries").select("*").execute().data or []
+    )
+
+    # Source performance
+    source_perf = (
+        db.table("v_weekly_source_performance").select("*").execute().data or []
+    )
+
+    if not objections and not summaries:
+        logger.info("No objections or summaries last week — skipping marketing intel")
+        return {"week_start": str(week_start), "total_calls": total_calls, "status": "skipped"}
+
+    # ── Call Claude ─────────────────────────────────────────────────────
+    intel = generate_marketing_intel(
+        source_performance_json=_json.dumps(source_perf, indent=2, default=str),
+        objections_json=_json.dumps(objections, indent=2, default=str),
+        ai_summaries_json=_json.dumps(summaries, indent=2, default=str),
+        week_start=str(week_start),
+        week_end=str(week_end),
+    )
+
+    # ── Post to Slack ──────────────────────────────────────────────────
+    blocks = build_marketing_intel_blocks(
+        week_start=str(week_start),
+        week_end=str(week_end),
+        intel=intel,
+    )
+    fallback = build_marketing_fallback_text(
+        week_start=str(week_start),
+        total_calls=total_calls,
+    )
+
+    ts = post_message(
+        channel=settings.slack_marketing_channel,
+        blocks=blocks,
+        text=fallback,
+    )
+    logger.info("Marketing intel posted: ts=%s", ts)
+
+    return {
+        "week_start": str(week_start),
+        "total_calls": total_calls,
+        "objections": len(objections),
+        "summaries": len(summaries),
         "ts": ts,
     }

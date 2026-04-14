@@ -1,8 +1,8 @@
 # Project Status — Sales Call Analyzer
 
-**Last updated:** 2026-04-08
-**Current commit:** `f5e9791`
-**Phase:** v0.1 fully validated end-to-end + multi-agent VPS infrastructure ready. Awaiting first VPS deployment (Step 11).
+**Last updated:** 2026-04-14
+**Current commit:** `182b672`
+**Phase:** v0.1 deployed to production on Hostinger VPS at `api.gogrowlabs.com`.
 
 > **Deploying this for the first time?** Read [`INSTALL.md`](./INSTALL.md)
 > for a complete step-by-step guide. This file is for tracking *what's
@@ -134,47 +134,31 @@ See `infra/caddy/README.md` for the full host setup walkthrough.
 
 ---
 
+### Step 11 — Deploy to VPS ✅ (deployed 2026-04-14)
+
+**Hostinger VPS:** Ubuntu 24, IP `2.24.198.69`
+**Domain:** `api.gogrowlabs.com` (A record → VPS IP)
+**Layout:** `/srv/caddy/` (reverse proxy) + `/srv/salesagent/` (app)
+
+- [x] Provision VPS, install Docker + Compose v2
+- [x] `docker network create web`, firewall (80/443 + SSH)
+- [x] DNS A record `api.gogrowlabs.com` → `2.24.198.69`
+- [x] Caddy up with auto-TLS cert for `api.gogrowlabs.com`
+- [x] Salesagent up — all 5 containers (api, worker, beat, redis, flower)
+- [x] `curl https://api.gogrowlabs.com/salesgrader/health/ready` → `{"status":"ready",...}` ✅
+- [x] Test curl → Claude scoring → Slack scorecard ✅
+- [x] Weekly report tested via CLI ✅
+- [ ] Connect GHL workflow webhook URL to production endpoint
+- [ ] Make a real call through GHL → verify scorecard in `#sales-scorecards`
+
+**Note:** `APP_ENV=development` is set because GHL doesn't natively
+HMAC-sign webhook payloads. The webhook URL is private/unguessable.
+
 ## What's NOT done yet
 
-### Step 11 — Deploy to the VPS ⏳ next
+**Hardening (recommended before heavy usage):**
 
-The system runs locally end-to-end. The Caddy reverse proxy and
-multi-agent VPS layout are already wired up (commit `f5e9791`). The
-remaining work is moving it onto a real always-on server.
-
-**Target:** single VPS, multi-agent layout fronted by Caddy.
-See `infra/caddy/README.md` for the step-by-step host walkthrough.
-
-**Deploy checklist (in order):**
-
-- [ ] Provision a Linux VPS (Ubuntu 22.04+ or Debian 12+, 2 GB RAM
-      recommended for room to grow into multi-agent)
-- [ ] Install Docker + Docker Compose v2 on the VPS
-- [ ] `docker network create web` (one-time, before any compose stack)
-- [ ] `sudo ufw allow 80/tcp 443/tcp && sudo ufw enable`
-- [ ] Point DNS A record `api.<DOMAIN>` at the VPS's public IP
-- [ ] Wait for DNS propagation (`dig api.<DOMAIN>` to verify)
-- [ ] Copy `infra/caddy/` to `/srv/caddy/` on the VPS, populate `.env`
-- [ ] Copy salesagent project to `/srv/salesagent/` on the VPS
-- [ ] Populate `/srv/salesagent/.env` with all real values
-- [ ] Flip `APP_ENV=production` in the salesagent `.env`
-- [ ] `cd /srv/caddy && docker compose up -d` — verify cert issuance
-- [ ] `cd /srv/salesagent && docker compose up -d` — verify health
-- [ ] `curl https://api.<DOMAIN>/salesgrader/health/ready` — should
-      return `{"status":"ready","checks":{"supabase":"ok","redis":"ok"}}`
-- [ ] Update GHL workflow webhook URL to
-      `https://api.<DOMAIN>/salesgrader/webhooks/ghl/transcript-ready`
-- [ ] Make a real test call through GHL → verify scorecard lands in
-      `#sales-scorecards`
-
-**Pre-deploy hardening (still pending — do before exposing publicly):**
-
-- [ ] Decide on webhook signature strategy: GHL workflow webhooks
-      don't natively HMAC-sign, so options are (a) middleware service
-      to re-sign, (b) Cloudflare Tunnel + Access for trust, or
-      (c) accept the risk because the URL is private/firewalled
-- [ ] Lock down Flower behind Caddy basicauth (template in
-      `infra/caddy/README.md`) or remove the service entirely
+- [ ] Lock down Flower behind Caddy basicauth or remove the service
 - [ ] Enable Sentry (or another error-alerting story)
 - [ ] Set up Anthropic spending alerts in the Console
 - [ ] Verify Supabase backups are enabled and test a restore once

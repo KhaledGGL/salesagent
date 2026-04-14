@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     slack_bot_token: str
     slack_scorecard_channel: str = "sales-scorecards"
     slack_reports_channel: str = "sales-reports"
+    slack_marketing_channel: str = "sales-reports"
+
+    # Business context (optional — injected into Claude prompts for
+    # industry/offer-specific scoring. Leave blank for generic analysis.)
+    business_context: str = ""
 
     # Celery beat
     weekly_report_day: str = "monday"

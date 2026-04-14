@@ -56,4 +56,20 @@ celery_app.conf.beat_schedule = {
             day_of_week=_day_to_cron(settings.weekly_report_day),
         ),
     },
+    "weekly-coaching-lesson": {
+        "task": "generate_coaching_lesson",
+        "schedule": crontab(
+            hour=settings.weekly_report_hour,
+            minute=5,
+            day_of_week=_day_to_cron(settings.weekly_report_day),
+        ),
+    },
+    "weekly-marketing-intel": {
+        "task": "generate_marketing_intel",
+        "schedule": crontab(
+            hour=settings.weekly_report_hour,
+            minute=10,
+            day_of_week=_day_to_cron(settings.weekly_report_day),
+        ),
+    },
 }

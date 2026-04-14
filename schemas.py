@@ -139,3 +139,54 @@ class ScorecardOutput(BaseModel):
     win_loss_moment: WinLossMoment
     coaching_moments: list[CoachingMoment]
     objections: list[Objection]
+
+
+# ── Coaching Lesson (Claude output) ──────────────────────────────────────────
+
+class CoachingExample(BaseModel):
+    rep_name: str
+    what_they_did: str
+    quote: str
+
+class CategoryInsight(BaseModel):
+    category: str
+    best_examples: list[CoachingExample] = []
+    worst_examples: list[CoachingExample] = []
+    advice: str
+
+class CoachingLessonOutput(BaseModel):
+    """Shape Claude must return for weekly coaching lesson."""
+    headline: str
+    category_insights: list[CategoryInsight]
+    weekly_focus: str
+
+
+# ── Marketing Intelligence (Claude output) ───────────────────────────────────
+
+class MessagingAngle(BaseModel):
+    pain_point: str
+    frequency: int
+    example_quotes: list[str]
+
+class SourceAnalysis(BaseModel):
+    source: str
+    close_rate: Optional[float] = None
+    quality_assessment: str
+    recommendation: str
+
+class PrequalRec(BaseModel):
+    recommendation: str
+    rationale: str
+
+class PositioningGap(BaseModel):
+    gap: str
+    evidence: str
+    recommendation: str
+
+class MarketingIntelOutput(BaseModel):
+    """Shape Claude must return for weekly marketing intelligence."""
+    headline: str
+    messaging_angles: list[MessagingAngle]
+    source_analysis: list[SourceAnalysis]
+    prequalification_recs: list[PrequalRec]
+    positioning_gaps: list[PositioningGap]

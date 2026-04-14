@@ -36,6 +36,16 @@ def _cmd_run_weekly_report(args: argparse.Namespace) -> int:
     return _enqueue("generate_weekly_report", generate_weekly_report)
 
 
+def _cmd_run_coaching_lesson(args: argparse.Namespace) -> int:
+    from app.workers.tasks import generate_coaching_lesson_task
+    return _enqueue("generate_coaching_lesson", generate_coaching_lesson_task)
+
+
+def _cmd_run_marketing_intel(args: argparse.Namespace) -> int:
+    from app.workers.tasks import generate_marketing_intel_task
+    return _enqueue("generate_marketing_intel", generate_marketing_intel_task)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="salesagent",
@@ -62,6 +72,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Manually trigger the weekly report task (normally runs via Celery beat).",
     )
     p_report.set_defaults(func=_cmd_run_weekly_report)
+
+    p_coaching = sub.add_parser(
+        "run-coaching-lesson",
+        help="Manually trigger the coaching lesson task (normally runs via Celery beat).",
+    )
+    p_coaching.set_defaults(func=_cmd_run_coaching_lesson)
+
+    p_marketing = sub.add_parser(
+        "run-marketing-intel",
+        help="Manually trigger the marketing intelligence task (normally runs via Celery beat).",
+    )
+    p_marketing.set_defaults(func=_cmd_run_marketing_intel)
 
     return parser
 
