@@ -251,3 +251,42 @@ class TestFallbackText:
         text = build_marketing_fallback_text("2026-04-06", 42)
         assert "42" in text
         assert "2026-04-06" in text
+
+
+# ── Section chunking regression ─────────────────────────────────────────────
+
+class TestSectionChunking:
+    """Slack rejects a section whose text exceeds 3000 chars with
+    `invalid_blocks`. When Claude is verbose, a single category's entries
+    can blow past that. Every section block we emit must stay under the
+    limit; the render still includes every entry.
+    """
+
+    def test_long_positioning_gaps_split_across_blocks(self):
+        long_evidence = "x" * 500
+        gaps = [
+            PositioningGap(
+                gap=f"Gap {i}",
+                evidence=long_evidence,
+                recommendation=f"Fix {i}",
+            )
+            for i in range(10)
+        ]
+        blocks = build_marketing_intel_blocks(
+            week_start="2026-04-06", week_end="2026-04-12",
+            intel=_intel(gaps=gaps),
+        )
+        section_lengths = [
+            len(b["text"]["text"])
+            for b in blocks
+            if b.get("type") == "section" and b["text"].get("type") == "mrkdwn"
+        ]
+        assert section_lengths, "expected at least one mrkdwn section"
+        assert all(length < 3000 for length in section_lengths), (
+            f"section text lengths must stay under Slack's 3000-char limit: {section_lengths}"
+        )
+
+        text = _as_text(blocks)
+        for i in range(10):
+            assert f"Gap {i}" in text
+            assert f"Fix {i}" in text

@@ -6,6 +6,7 @@ No DB access, trivially unit-testable.
 
 from typing import Any
 
+from app.core.slack_text import chunk_mrkdwn_section
 from schemas import MarketingIntelOutput
 
 
@@ -43,13 +44,7 @@ def build_marketing_intel_blocks(
             angle_lines.append(
                 f"• *{angle.pain_point}* ({angle.frequency}x) — {quotes}"
             )
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*🎤 Top Messaging Angles*\n" + "\n".join(angle_lines),
-            },
-        })
+        blocks.extend(chunk_mrkdwn_section("*🎤 Top Messaging Angles*", angle_lines))
         blocks.append({"type": "divider"})
 
     # ── Source Analysis ─────────────────────────────────────────────────
@@ -61,13 +56,7 @@ def build_marketing_intel_blocks(
                 f"• *{src.source}* — {rate} close rate | {src.quality_assessment}\n"
                 f"   → _{src.recommendation}_"
             )
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*📊 Lead Source Quality*\n" + "\n".join(source_lines),
-            },
-        })
+        blocks.extend(chunk_mrkdwn_section("*📊 Lead Source Quality*", source_lines))
         blocks.append({"type": "divider"})
 
     # ── Pre-qualification Recommendations ──────────────────────────────
@@ -75,13 +64,9 @@ def build_marketing_intel_blocks(
         prequal_lines = []
         for i, rec in enumerate(intel.prequalification_recs, 1):
             prequal_lines.append(f"{i}. *{rec.recommendation}*\n   _{rec.rationale}_")
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*🎯 Pre-Qualification Recommendations*\n" + "\n".join(prequal_lines),
-            },
-        })
+        blocks.extend(
+            chunk_mrkdwn_section("*🎯 Pre-Qualification Recommendations*", prequal_lines)
+        )
         blocks.append({"type": "divider"})
 
     # ── Positioning Gaps ───────────────────────────────────────────────
@@ -93,13 +78,7 @@ def build_marketing_intel_blocks(
                 f"   Evidence: _{gap.evidence}_\n"
                 f"   → _{gap.recommendation}_"
             )
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*⚠️ Positioning Gaps*\n" + "\n".join(gap_lines),
-            },
-        })
+        blocks.extend(chunk_mrkdwn_section("*⚠️ Positioning Gaps*", gap_lines))
 
     return blocks
 

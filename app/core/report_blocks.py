@@ -6,6 +6,8 @@ return Block Kit. No DB access here, so they're trivially unit-testable.
 
 from typing import Any
 
+from app.core.slack_text import chunk_mrkdwn_section
+
 TOP_N = 3  # how many reps / objections to surface per bucket
 
 
@@ -113,18 +115,13 @@ def build_weekly_report_blocks(
     )[:TOP_N]
 
     if top_by_close:
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*🏆 Top Performers*\n" + "\n".join(
-                    f"{i+1}. *{r['rep_name']}* — {_pct(r.get('close_rate_pct'))} "
-                    f"close rate ({r['total_calls']} calls, "
-                    f"{_score_emoji(r.get('avg_overall_score'))} {_num(r.get('avg_overall_score'), 1)} avg)"
-                    for i, r in enumerate(top_by_close)
-                ),
-            },
-        })
+        top_lines = [
+            f"{i+1}. *{r['rep_name']}* — {_pct(r.get('close_rate_pct'))} "
+            f"close rate ({r['total_calls']} calls, "
+            f"{_score_emoji(r.get('avg_overall_score'))} {_num(r.get('avg_overall_score'), 1)} avg)"
+            for i, r in enumerate(top_by_close)
+        ]
+        blocks.extend(chunk_mrkdwn_section("*🏆 Top Performers*", top_lines))
 
     # ── Reps needing coaching (by lowest avg score, ≥3 calls) ───────────
     needs_coaching = sorted(
@@ -133,18 +130,13 @@ def build_weekly_report_blocks(
     )[:TOP_N]
 
     if needs_coaching:
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*🎯 Needs Coaching*\n" + "\n".join(
-                    f"{i+1}. *{r['rep_name']}* — "
-                    f"{_score_emoji(r['avg_overall_score'])} {_num(r['avg_overall_score'], 1)} avg "
-                    f"({r['total_calls']} calls, {_pct(r.get('close_rate_pct'))} close)"
-                    for i, r in enumerate(needs_coaching)
-                ),
-            },
-        })
+        coach_lines = [
+            f"{i+1}. *{r['rep_name']}* — "
+            f"{_score_emoji(r['avg_overall_score'])} {_num(r['avg_overall_score'], 1)} avg "
+            f"({r['total_calls']} calls, {_pct(r.get('close_rate_pct'))} close)"
+            for i, r in enumerate(needs_coaching)
+        ]
+        blocks.extend(chunk_mrkdwn_section("*🎯 Needs Coaching*", coach_lines))
 
     # ── Top objections ───────────────────────────────────────────────────
     if top_objections:
@@ -156,13 +148,7 @@ def build_weekly_report_blocks(
                 f"({_pct(o.get('pct_of_total'))}) on _{src}_ leads"
             )
         blocks.append({"type": "divider"})
-        blocks.append({
-            "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": "*🚧 Top Objections*\n" + "\n".join(obj_lines),
-            },
-        })
+        blocks.extend(chunk_mrkdwn_section("*🚧 Top Objections*", obj_lines))
 
     return blocks
 

@@ -6,6 +6,7 @@ No DB access, trivially unit-testable.
 
 from typing import Any
 
+from app.core.slack_text import chunk_mrkdwn_section
 from schemas import CoachingLessonOutput
 
 
@@ -65,30 +66,18 @@ def build_coaching_lesson_blocks(
         })
 
         if insight.best_examples:
-            best_lines = "\n".join(
+            best_lines = [
                 f"  • *{ex.rep_name}*: {ex.what_they_did} — _{ex.quote}_"
                 for ex in insight.best_examples
-            )
-            blocks.append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"✅ *What went well:*\n{best_lines}",
-                },
-            })
+            ]
+            blocks.extend(chunk_mrkdwn_section("✅ *What went well:*", best_lines))
 
         if insight.worst_examples:
-            worst_lines = "\n".join(
+            worst_lines = [
                 f"  • *{ex.rep_name}*: {ex.what_they_did} — _{ex.quote}_"
                 for ex in insight.worst_examples
-            )
-            blocks.append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": f"❌ *What needs work:*\n{worst_lines}",
-                },
-            })
+            ]
+            blocks.extend(chunk_mrkdwn_section("❌ *What needs work:*", worst_lines))
 
         blocks.append({
             "type": "context",
