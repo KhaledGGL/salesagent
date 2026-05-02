@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from enum import Enum
 
 
@@ -21,6 +21,7 @@ class CallType(str, Enum):
 class CallOutcome(str, Enum):
     sold = "sold"
     not_sold = "not_sold"
+    follow_up = "follow_up"
     no_show = "no_show"
     rescheduled = "rescheduled"
 
@@ -134,6 +135,9 @@ class Objection(BaseModel):
 class ScorecardOutput(BaseModel):
     """Exact shape Claude must return."""
     scores: ScoreBand
+    outcome: Literal["sold", "not_sold", "follow_up"]
+    outcome_confidence: float = Field(ge=0.0, le=1.0)
+    outcome_evidence: str
     therapist_mode_flag: bool
     therapist_mode_reason: Optional[str] = None
     ai_summary: str

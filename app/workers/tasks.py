@@ -80,7 +80,11 @@ def _enrich_from_contact(contact: dict[str, Any]) -> dict[str, Any]:
         "lead_source": map_ghl_source(contact.get("source", "")),
         "lead_temperature": _derive_lead_temperature(contact),
         "call_type": _custom_field(contact, "call_type", "discovery"),
-        "outcome": _custom_field(contact, "call_outcome", "not_sold"),
+        # Outcome is intentionally NOT read from a CRM custom field.
+        # It's now classified by Claude from the transcript itself
+        # (see score_call → ScorecardOutput.outcome). Reps populate CRM
+        # outcome fields after the call ends — often after scoring runs —
+        # so reading it here was reliably undercounting closes.
     }
 
 
@@ -225,7 +229,6 @@ def score_call(self, call_id: str) -> dict:
                 lead_source=call.get("lead_source"),
                 lead_temperature=call.get("lead_temperature"),
                 call_type=call.get("call_type"),
-                outcome=call.get("outcome"),
                 duration_seconds=call.get("duration_seconds"),
             )
         except TranscriptTooShortError as exc:
@@ -255,7 +258,13 @@ def score_call(self, call_id: str) -> dict:
             "win_loss_timestamp": scorecard.win_loss_moment.timestamp_seconds,
             "win_loss_description": scorecard.win_loss_moment.description,
             "ai_summary": scorecard.ai_summary,
+            "outcome_confidence": scorecard.outcome_confidence,
+            "outcome_evidence": scorecard.outcome_evidence,
         }).execute()
+
+        # Write the AI-classified outcome onto the call row so the views
+        # (which filter on calls.outcome = 'sold') count this correctly.
+        db.table("calls").update({"outcome": scorecard.outcome}).eq("id", call_id).execute()
 
         # ── Persist coaching moments ─────────────────────────────────────
         if scorecard.coaching_moments:
@@ -370,6 +379,8 @@ def notify_scorecard(self, call_id: str) -> dict:
         lead_name=call.get("lead_name"),
         lead_source=call.get("lead_source"),
         outcome=call.get("outcome"),
+        outcome_confidence=score.get("outcome_confidence"),
+        outcome_evidence=score.get("outcome_evidence"),
         scores={
             "rapport": score["rapport_score"],
             "diagnosis": score["diagnosis_score"],

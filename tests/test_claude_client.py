@@ -45,7 +45,6 @@ def _call(**overrides):
         lead_source="meta",
         lead_temperature="warm",
         call_type="discovery",
-        outcome="sold",
         duration_seconds=1200,
     )
     kwargs.update(overrides)

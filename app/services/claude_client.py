@@ -57,10 +57,14 @@ def score_transcript(
     lead_source: str | None,
     lead_temperature: str | None,
     call_type: str | None,
-    outcome: str | None,
     duration_seconds: int | None,
 ) -> ScorecardOutput:
     """Send a transcript to Claude and return a validated ScorecardOutput.
+
+    The outcome (sold / not_sold / follow_up) is detected by Claude from
+    the transcript itself — we deliberately do NOT pass any CRM-derived
+    outcome hint, since reps update CRM fields after the call (often
+    after scoring runs) and the resulting bias was undercounting closes.
 
     Raises:
         TranscriptTooShortError: Claude returned an {"error": ...} response.
@@ -75,7 +79,6 @@ def score_transcript(
         lead_source=lead_source or "unknown",
         lead_temperature=lead_temperature or "unknown",
         call_type=call_type or "discovery",
-        outcome=outcome or "unknown",
         duration_minutes=duration_minutes,
         transcript=transcript,
     )

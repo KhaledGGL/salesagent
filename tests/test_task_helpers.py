@@ -69,7 +69,9 @@ class TestEnrichFromContact:
         assert result["lead_source"] == "meta"
         assert result["lead_temperature"] == "warm"
         assert result["call_type"] == "discovery"
-        assert result["outcome"] == "sold"
+        # outcome intentionally omitted — Claude classifies it from the
+        # transcript (see ScorecardOutput.outcome / score_call), not GHL CF
+        assert "outcome" not in result
 
     def test_lead_name_fallback_to_name_field(self):
         contact = {"name": "Jane Doe"}

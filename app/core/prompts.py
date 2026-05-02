@@ -48,6 +48,17 @@ Measures: Adherence to AHM trust sequence, script framework, and non-negotiable 
 - 7–9: Clean execution of the trust sequence with minor variations that didn't hurt the call
 - 10: Textbook execution — could be used as a training call
 
+## Outcome Detection
+Classify the call's outcome based on what was actually said in the transcript. Do NOT rely on metadata or external systems — only the transcript.
+
+- **sold**: The prospect made an explicit verbal commitment to purchase AND a concrete financial/contractual action was discussed on the call. Examples: "Yes, let's do it, here's my card", "Send me the contract", "I'll wire the payment today", "Charge the card". A vague "yes I'm interested" is NOT sold.
+- **follow_up**: The prospect showed interest but deferred the decision. Examples: "Let me think about it", "I need to talk to my spouse", "Send me the info and I'll review", "Call me next week", "I'll get back to you". This is a soft commitment, not a close.
+- **not_sold**: The prospect explicitly declined ("not interested", "this isn't for me", "too expensive, no thanks") OR the call ended with no commitment of any kind (rambling end, hung up, technical issues, no next step established).
+
+Also return:
+- `outcome_confidence`: a float between 0.0 and 1.0 reflecting how clearly the transcript supports your classification. 1.0 = unambiguous (e.g. card was given), 0.5 = could go either way, 0.0 = guessing.
+- `outcome_evidence`: ONE sentence quoting or paraphrasing the specific dialogue that drove the classification. Include an approximate timestamp if possible. Example: "At ~22:14 the prospect said 'yes send me the link, I want to start this week'."
+
 ## Therapist Mode Detection
 Flag therapist_mode_flag as true if ANY of the following are present:
 - Rep spent more than 10 minutes in rapport/story-sharing before the first diagnostic question
@@ -95,6 +106,9 @@ You MUST return a JSON object with EXACTLY this shape. Field names, nesting, and
     "compliance": 9,
     "overall": 7
   },
+  "outcome": "sold",
+  "outcome_confidence": 0.95,
+  "outcome_evidence": "At ~22:14 the prospect said 'yes send me the link, I want to start this week' and provided a card.",
   "therapist_mode_flag": false,
   "therapist_mode_reason": null,
   "ai_summary": "Three to five sentences describing what happened and the single most important thing the rep should work on next.",
@@ -123,6 +137,9 @@ You MUST return a JSON object with EXACTLY this shape. Field names, nesting, and
 
 ### Field constraints
 - `scores.*`: integers 1–10 inclusive. `overall` MUST be inside `scores`, not at the top level.
+- `outcome`: MUST be one of: "sold", "not_sold", "follow_up".
+- `outcome_confidence`: float between 0.0 and 1.0 inclusive.
+- `outcome_evidence`: a SINGLE string, one sentence, quoting or paraphrasing the dialogue that drove the classification.
 - `therapist_mode_flag`: boolean. `therapist_mode_reason`: a SINGLE string (or null), not a list.
 - `win_loss_moment`: REQUIRED object with `timestamp_seconds` (int) and `description` (string).
 - `coaching_moments[*].category`: MUST be one of: "rapport", "diagnosis", "objection_handling", "close", "compliance".
@@ -142,7 +159,6 @@ Analyze the following sales call transcript and return the JSON scorecard.
 - Lead source: {lead_source}
 - Lead temperature: {lead_temperature}
 - Call type: {call_type}
-- Reported outcome: {outcome}
 - Call duration: {duration_minutes} minutes
 
 ## Transcript

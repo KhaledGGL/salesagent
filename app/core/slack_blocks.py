@@ -27,6 +27,7 @@ def _outcome_emoji(outcome: str | None) -> str:
     return {
         "sold": "✅",
         "not_sold": "❌",
+        "follow_up": "🔄",
         "no_show": "👻",
         "rescheduled": "📅",
     }.get(outcome or "", "•")
@@ -54,10 +55,17 @@ def build_scorecard_blocks(
     win_loss_timestamp: int | None,
     win_loss_description: str | None,
     recording_url: str | None,
+    outcome_confidence: float | None = None,
+    outcome_evidence: str | None = None,
 ) -> list[dict[str, Any]]:
     """Compose the primary Block Kit message for a scored call."""
     overall_e = _score_emoji(overall_score)
     outcome_e = _outcome_emoji(outcome)
+
+    # Outcome line: include AI confidence as a percentage when present.
+    outcome_text = f"{outcome_e} {outcome or '—'}"
+    if outcome_confidence is not None:
+        outcome_text += f" ({int(round(float(outcome_confidence) * 100))}% conf)"
 
     blocks: list[dict[str, Any]] = [
         {
@@ -76,13 +84,27 @@ def build_scorecard_blocks(
                     "text": (
                         f"*Lead:* {lead_name or '—'}   "
                         f"*Source:* {lead_source or '—'}   "
-                        f"*Outcome:* {outcome_e} {outcome or '—'}"
+                        f"*Outcome:* {outcome_text}"
                     ),
                 }
             ],
         },
-        {"type": "divider"},
     ]
+
+    # Evidence sentence — what specifically drove the AI's outcome call.
+    # Lets reps and managers verify the classification at a glance.
+    if outcome_evidence:
+        blocks.append({
+            "type": "context",
+            "elements": [
+                {
+                    "type": "mrkdwn",
+                    "text": f"_{outcome_evidence}_",
+                }
+            ],
+        })
+
+    blocks.append({"type": "divider"})
 
     # ── Therapist mode banner ─────────────────────────────────────────────
     if therapist_mode_flag:

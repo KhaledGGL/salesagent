@@ -82,6 +82,9 @@ class TestOutcomeEmoji:
     def test_no_show(self):
         assert _outcome_emoji("no_show") == "👻"
 
+    def test_follow_up(self):
+        assert _outcome_emoji("follow_up") == "🔄"
+
     def test_none(self):
         assert _outcome_emoji(None) == "•"
 
@@ -159,6 +162,34 @@ class TestBuildScorecardBlocks:
     def test_ai_summary_present(self):
         text = _as_text(_build())
         assert "Solid discovery" in text
+
+    def test_outcome_confidence_rendered_as_percent(self):
+        blocks = build_scorecard_blocks(
+            rep_name="Sarah", lead_name="John", lead_source="meta",
+            outcome="sold", outcome_confidence=0.92,
+            outcome_evidence="Prospect said 'charge the card'.",
+            scores=SCORES, overall_score=8,
+            therapist_mode_flag=False, therapist_mode_reason=None,
+            ai_summary="ok", win_loss_timestamp=None,
+            win_loss_description=None, recording_url=None,
+        )
+        text = _as_text(blocks)
+        assert "92% conf" in text
+        assert "charge the card" in text
+
+    def test_outcome_evidence_omitted_when_none(self):
+        blocks = build_scorecard_blocks(
+            rep_name="Sarah", lead_name="John", lead_source="meta",
+            outcome="follow_up", outcome_confidence=None, outcome_evidence=None,
+            scores=SCORES, overall_score=6,
+            therapist_mode_flag=False, therapist_mode_reason=None,
+            ai_summary="ok", win_loss_timestamp=None,
+            win_loss_description=None, recording_url=None,
+        )
+        text = _as_text(blocks)
+        assert "conf" not in text  # no confidence pill rendered
+        # follow_up emoji should still render
+        assert "🔄" in text
 
 
 class TestCoachingMomentBlock:
