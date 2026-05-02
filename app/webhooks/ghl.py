@@ -291,10 +291,14 @@ async def ghl_transcript_ready(
 
     db = get_supabase()
 
-    # 4a. Upsert rep (auto-provision with placeholder name)
+    # 4a. Upsert rep — auto-provision new reps; backfill placeholder names
+    # on existing rows when a real call_user_name now arrives.
+    placeholder_name = f"Rep {payload.call_user_id[:8]}"
+    real_name = (payload.call_user_name or "").strip() or None
+
     rep_row = (
         db.table("reps")
-        .select("id")
+        .select("id, name")
         .eq("ghl_user_id", payload.call_user_id)
         .maybe_single()
         .execute()
@@ -302,17 +306,25 @@ async def ghl_transcript_ready(
     # supabase-py 2.28+ returns None directly when no row matches.
     if rep_row is not None and rep_row.data:
         rep_id = rep_row.data["id"]
+        # Backfill: if the stored name is still our auto-provisioned placeholder
+        # and we now have a real name, upgrade it. Don't touch human-edited names.
+        if real_name and rep_row.data.get("name") == placeholder_name:
+            db.table("reps").update({"name": real_name}).eq("id", rep_id).execute()
+            logger.info("Backfilled rep %s name → %r", rep_id, real_name)
     else:
         new_rep = (
             db.table("reps")
             .insert({
                 "ghl_user_id": payload.call_user_id,
-                "name": f"Rep {payload.call_user_id[:8]}",
+                "name": real_name or placeholder_name,
             })
             .execute()
         )
         rep_id = new_rep.data[0]["id"]
-        logger.info("Auto-provisioned rep %s for ghl_user_id=%s", rep_id, payload.call_user_id)
+        logger.info(
+            "Auto-provisioned rep %s for ghl_user_id=%s name=%r",
+            rep_id, payload.call_user_id, real_name or placeholder_name,
+        )
 
     # 4b. Dedup on call_sid (Twilio SID is globally unique per call)
     existing = (

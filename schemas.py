@@ -93,6 +93,7 @@ class GHLTranscriptReadyPayload(BaseModel):
     """
     call_sid: str                       # used as ghl_message_id (Twilio call SID, globally unique)
     call_user_id: str                   # rep's GHL user ID
+    call_user_name: Optional[str] = None  # rep's display name (e.g. "John Smith")
     call_transcript: str                # the actual dialogue text
     call_duration: Optional[int] = None
     call_status: Optional[str] = None   # we filter to "completed" only
