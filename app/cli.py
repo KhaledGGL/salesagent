@@ -12,6 +12,7 @@ tasks directly. Enqueued jobs inherit the normal retry/backoff behavior.
 
 import argparse
 import sys
+from datetime import datetime, timedelta, timezone
 from typing import Callable
 
 
@@ -44,6 +45,57 @@ def _cmd_run_coaching_lesson(args: argparse.Namespace) -> int:
 def _cmd_run_marketing_intel(args: argparse.Namespace) -> int:
     from app.workers.tasks import generate_marketing_intel_task
     return _enqueue("generate_marketing_intel", generate_marketing_intel_task)
+
+
+def _cmd_replay_failed(args: argparse.Namespace) -> int:
+    """Re-enqueue scoring for all calls that failed in the last N days.
+
+    Designed for the "Claude was out of credits" recovery case: failed calls
+    keep their transcript on the row but have no call_scores child, so
+    re-running score_call inserts cleanly without unique-constraint issues.
+    """
+    from app.db import get_supabase
+    from app.workers.tasks import score_call
+
+    db = get_supabase()
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=args.days)).isoformat()
+
+    rows = (
+        db.table("calls")
+        .select("id, called_at, error_message, transcript")
+        .eq("status", "failed")
+        .gte("called_at", cutoff_iso)
+        .order("called_at")
+        .execute()
+        .data
+        or []
+    )
+
+    # Drop rows that never got a transcript — those can't be re-scored.
+    replayable = [r for r in rows if (r.get("transcript") or "").strip()]
+    skipped = len(rows) - len(replayable)
+
+    if not replayable:
+        print(f"No replayable failed calls in the last {args.days} day(s).")
+        if skipped:
+            print(f"({skipped} failed call(s) had no transcript and were skipped.)")
+        return 0
+
+    print(
+        f"Found {len(replayable)} failed call(s) with transcript "
+        f"(skipped {skipped} without transcript). days={args.days} dry_run={args.dry_run}"
+    )
+
+    if args.dry_run:
+        for r in replayable:
+            print(f"  [dry-run] would replay {r['id']} called_at={r['called_at']}")
+        return 0
+
+    for r in replayable:
+        result = score_call.delay(r["id"])
+        print(f"  enqueued score_call({r['id']}) — task id: {result.id}")
+
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -84,6 +136,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Manually trigger the marketing intelligence task (normally runs via Celery beat).",
     )
     p_marketing.set_defaults(func=_cmd_run_marketing_intel)
+
+    p_replay_failed = sub.add_parser(
+        "replay-failed",
+        help="Re-enqueue scoring for all calls in status='failed' from the last N days.",
+    )
+    p_replay_failed.add_argument(
+        "--days", type=int, default=7,
+        help="Look back this many days from now (default: 7).",
+    )
+    p_replay_failed.add_argument(
+        "--dry-run", action="store_true",
+        help="List what would be replayed without enqueuing anything.",
+    )
+    p_replay_failed.set_defaults(func=_cmd_replay_failed)
 
     return parser
 
