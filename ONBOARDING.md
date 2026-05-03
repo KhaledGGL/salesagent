@@ -144,6 +144,11 @@ BUSINESS_CONTEXT="<one-paragraph description of what they sell, to whom, price p
 WEEKLY_REPORT_DAY=monday
 WEEKLY_REPORT_HOUR=8
 
+# CRITICAL: must match the Caddy path prefix exactly. Without it, the
+# UI loads but every link/form/pagination breaks (browser strips the
+# prefix). Use a leading slash, no trailing slash.
+URL_PREFIX=/colt
+
 SENTRY_DSN=                         # leave blank unless you want errors in Sentry
 ```
 

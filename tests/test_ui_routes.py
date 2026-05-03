@@ -107,3 +107,32 @@ def test_base_layout_uses_dark_zinc_palette(client):
     body = client.get("/ui/").text
     assert "bg-zinc-950" in body, "body should be on the dark zinc-950 background"
     assert 'class="dark"' in body, "html element should be marked .dark for any future tailwind dark: variants"
+
+
+# ── URL_PREFIX wiring (path-stripping reverse proxy support) ────────────────
+
+def test_url_prefix_applied_to_nav_links(monkeypatch, client):
+    """Behind a path-stripping proxy (Caddy handle_path /salesgrader/*), the
+    app sees clean /ui/* paths but every rendered link must include the
+    public prefix or browser navigation breaks."""
+    # Re-render the global with a non-empty prefix
+    from app.ui.routes import templates
+    original = templates.env.globals.get("URL_PREFIX", "")
+    templates.env.globals["URL_PREFIX"] = "/salesgrader"
+    try:
+        body = client.get("/ui/").text
+        # Every nav link should now be /salesgrader/ui/...
+        assert 'href="/salesgrader/ui/"' in body
+        assert 'href="/salesgrader/ui/calls"' in body
+        assert 'href="/salesgrader/ui/reps"' in body
+        assert 'href="/salesgrader/ui/sources"' in body
+        assert 'href="/salesgrader/ui/reports"' in body
+    finally:
+        templates.env.globals["URL_PREFIX"] = original
+
+
+def test_url_prefix_empty_renders_clean_paths(client):
+    """Default (no proxy / local dev) — links stay as bare /ui/* paths."""
+    body = client.get("/ui/").text
+    assert 'href="/ui/calls"' in body
+    assert 'href="/ui/reps"' in body

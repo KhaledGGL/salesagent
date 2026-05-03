@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     weekly_report_day: str = "monday"
     weekly_report_hour: int = 8
 
+    # Public URL prefix for the management UI when behind a path-stripping
+    # reverse proxy. Caddy's `handle_path /salesgrader/* {...}` strips the
+    # prefix before forwarding, so the app sees clean /ui/* paths but every
+    # rendered link must include the prefix or the browser will hit the
+    # wrong URL. Empty for local dev (no proxy); set to "/salesgrader" or
+    # "/colt" etc. per client deployment in production .env.
+    url_prefix: str = ""
+
     # Observability (optional — empty DSN disables Sentry cleanly)
     sentry_dsn: str | None = None
     sentry_traces_sample_rate: float = 0.1

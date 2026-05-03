@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.db import get_supabase
 from app.ui import helpers
+from config import settings
 
 # Page size for the calls list. Big enough that most weeks fit on one page,
 # small enough that the page renders fast even on a fresh DB.
@@ -28,9 +29,12 @@ CALLS_PER_PAGE = 25
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
-# Wire helpers into the Jinja env so templates can call them directly
-# without each route having to pass them as context kwargs.
+# Wire helpers + the URL prefix into the Jinja env so templates can call
+# them directly without each route having to pass them as context kwargs.
+# URL_PREFIX is the public-facing path (e.g. "/salesgrader") that Caddy
+# strips before forwarding to us; templates prepend it to every link.
 templates.env.globals["h"] = helpers
+templates.env.globals["URL_PREFIX"] = settings.url_prefix
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 

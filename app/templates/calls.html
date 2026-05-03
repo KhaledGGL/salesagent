@@ -13,7 +13,7 @@
 </div>
 
 {# ── Filter bar ───────────────────────────────────────────────────────── #}
-<form method="get" action="/ui/calls"
+<form method="get" action="{{ URL_PREFIX }}/ui/calls"
       class="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
 
     <div class="flex flex-col gap-1.5">
@@ -65,7 +65,7 @@
         Apply
     </button>
     {% if filters.rep_id or filters.outcome or filters.source or filters.days != 30 %}
-        <a href="/ui/calls" class="text-sm text-zinc-400 hover:text-zinc-200 transition">Reset</a>
+        <a href="{{ URL_PREFIX }}/ui/calls" class="text-sm text-zinc-400 hover:text-zinc-200 transition">Reset</a>
     {% endif %}
 </form>
 
@@ -88,7 +88,7 @@
             {% for c in calls %}
                 {% set rep = c.reps or {} %}
                 {% set sc = (c.call_scores or [{}])[0] %}
-                <tr onclick="window.location='/ui/calls/{{ c.id }}'"
+                <tr onclick="window.location='{{ URL_PREFIX }}/ui/calls/{{ c.id }}'"
                     class="cursor-pointer hover:bg-zinc-800/40 transition">
                     <td class="px-4 py-3 text-sm text-zinc-300 whitespace-nowrap tabular-nums">
                         {% if c.called_at %}{{ c.called_at[:16].replace('T', ' ') }}{% else %}—{% endif %}
@@ -141,13 +141,13 @@
         {% if filters.days %}{% set base_qs = base_qs ~ 'days=' ~ filters.days ~ '&' %}{% endif %}
 
         {% if page > 1 %}
-            <a href="/ui/calls{{ base_qs }}page={{ page - 1 }}"
+            <a href="{{ URL_PREFIX }}/ui/calls{{ base_qs }}page={{ page - 1 }}"
                class="rounded-md border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800 transition">← Prev</a>
         {% else %}
             <span class="rounded-md border border-zinc-800 px-3 py-1.5 text-zinc-600">← Prev</span>
         {% endif %}
         {% if page < total_pages %}
-            <a href="/ui/calls{{ base_qs }}page={{ page + 1 }}"
+            <a href="{{ URL_PREFIX }}/ui/calls{{ base_qs }}page={{ page + 1 }}"
                class="rounded-md border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800 transition">Next →</a>
         {% else %}
             <span class="rounded-md border border-zinc-800 px-3 py-1.5 text-zinc-600">Next →</span>
