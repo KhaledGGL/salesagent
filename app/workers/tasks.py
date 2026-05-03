@@ -440,6 +440,38 @@ def notify_scorecard(self, call_id: str) -> dict:
     return {"call_id": call_id, "status": "notified", "thread_ts": thread_ts}
 
 
+# ── Helper: persist a generated weekly report ───────────────────────────────
+
+def _persist_weekly_report(
+    report_type: str,
+    week_start: str | None,
+    week_end: str | None,
+    payload: dict[str, Any],
+) -> None:
+    """Idempotent upsert of a generated weekly report's JSON payload.
+
+    Best-effort: a DB hiccup must NOT block Slack delivery, since the
+    Slack post is the user-facing deliverable and the persistence is
+    a UI-archive convenience. Mirrors the rep_kpi_snapshots pattern in
+    generate_weekly_report.
+    """
+    if not week_start:
+        return  # zero-call week with no boundary — nothing to anchor on
+    try:
+        get_supabase().table("weekly_reports").upsert(
+            {
+                "report_type": report_type,
+                "week_start": str(week_start),
+                "week_end": str(week_end or week_start),
+                "payload": payload,
+            },
+            on_conflict="report_type,week_start",
+        ).execute()
+        logger.info("Persisted weekly_report type=%s week=%s", report_type, week_start)
+    except Exception as exc:
+        logger.error("weekly_reports upsert failed type=%s: %s", report_type, exc)
+
+
 # ── Task: generate_weekly_report ─────────────────────────────────────────────
 
 @celery_app.task(
@@ -517,6 +549,18 @@ def generate_weekly_report(self) -> dict:
                 # Don't let snapshot failures block the Slack post —
                 # the report itself is the user-facing deliverable.
                 logger.error("KPI snapshot upsert failed: %s", exc)
+
+    # ── Persist for the UI archive ───────────────────────────────────────
+    _persist_weekly_report(
+        "sales",
+        week_start,
+        week_end,
+        {
+            "overview": overview,
+            "rep_performance": rep_perf,
+            "top_objections": top_objections,
+        },
+    )
 
     # ── Build and post Slack report ─────────────────────────────────────
     blocks = build_weekly_report_blocks(
@@ -608,6 +652,9 @@ def generate_coaching_lesson_task(self) -> dict:
         avg_score=float(avg_score),
     )
 
+    # ── Persist for the UI archive ───────────────────────────────────────
+    _persist_weekly_report("coaching", str(week_start), str(week_end), lesson.model_dump())
+
     # ── Post to Slack ──────────────────────────────────────────────────
     blocks = build_coaching_lesson_blocks(
         week_start=str(week_start),
@@ -696,6 +743,9 @@ def generate_marketing_intel_task(self) -> dict:
         week_start=str(week_start),
         week_end=str(week_end),
     )
+
+    # ── Persist for the UI archive ───────────────────────────────────────
+    _persist_weekly_report("marketing", str(week_start), str(week_end), intel.model_dump())
 
     # ── Post to Slack ──────────────────────────────────────────────────
     blocks = build_marketing_intel_blocks(

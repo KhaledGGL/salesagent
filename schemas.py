@@ -67,6 +67,11 @@ class KpiPeriod(str, Enum):
     day_90 = "90d"
     weekly = "weekly"
 
+class WeeklyReportType(str, Enum):
+    sales = "sales"
+    coaching = "coaching"
+    marketing = "marketing"
+
 
 # ── GHL Webhook Payload ───────────────────────────────────────────────────────
 
