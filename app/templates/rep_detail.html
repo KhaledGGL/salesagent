@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Rep Detail{% endblock %}
+{% block content %}
+<div class="space-y-6">
+    <div>
+        <a href="/ui/reps" class="text-sm text-slate-500 hover:text-slate-900">← Back to reps</a>
+        <h1 class="mt-2 text-2xl font-semibold text-slate-900">Rep Detail</h1>
+        <p class="mt-1 text-sm text-slate-500">ID: <code class="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{{ rep_id }}</code></p>
+    </div>
+    <div class="rounded-lg border border-dashed border-slate-300 bg-white p-12 text-center text-slate-400">
+        Per-rep score trends + coaching effectiveness check coming next.
+    </div>
+</div>
+{% endblock %}

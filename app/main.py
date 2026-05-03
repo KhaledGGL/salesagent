@@ -9,6 +9,7 @@ from app.db import get_supabase
 from app.logging import configure_logging
 from app.observability import init_sentry
 from app.redis import get_redis
+from app.ui.routes import router as ui_router
 from app.webhooks.ghl import router as ghl_router
 
 configure_logging()
@@ -19,6 +20,7 @@ app = FastAPI(title="Sales Call Analyzer", version="0.1.0")
 
 # ── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(ghl_router)
+app.include_router(ui_router)
 
 
 # ── Liveness: process is alive. Used by Docker HEALTHCHECK and load balancers

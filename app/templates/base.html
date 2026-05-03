@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en" class="bg-slate-50">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Sales Coach{% endblock %} — Sales Coach</title>
+
+    <!-- Tailwind via CDN. For prod-grade compile-step we'd switch to a built CSS,
+         but with three leadership users this is the right tradeoff (zero build,
+         zero JS toolchain, ships in the same Docker image). -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- HTMX for interactive bits (filters, drill-ins) without writing JS -->
+    <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+
+    <!-- Chart.js for the trend graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
+
+    <style>
+        /* Tighten the default tailwind sans stack a touch */
+        body { font-feature-settings: "ss01", "cv11"; }
+    </style>
+</head>
+<body class="text-slate-800 antialiased">
+    <header class="border-b border-slate-200 bg-white">
+        <div class="mx-auto max-w-7xl px-6 py-3 flex items-center justify-between">
+            <a href="/ui/" class="font-semibold tracking-tight text-slate-900">Sales Coach</a>
+            <nav class="flex gap-6 text-sm">
+                <a href="/ui/" class="hover:text-slate-900 {% if active=='dashboard' %}text-slate-900 font-medium{% else %}text-slate-500{% endif %}">Overview</a>
+                <a href="/ui/calls" class="hover:text-slate-900 {% if active=='calls' %}text-slate-900 font-medium{% else %}text-slate-500{% endif %}">Calls</a>
+                <a href="/ui/reps" class="hover:text-slate-900 {% if active=='reps' %}text-slate-900 font-medium{% else %}text-slate-500{% endif %}">Reps</a>
+                <a href="/ui/sources" class="hover:text-slate-900 {% if active=='sources' %}text-slate-900 font-medium{% else %}text-slate-500{% endif %}">Sources</a>
+                <a href="/ui/objections" class="hover:text-slate-900 {% if active=='objections' %}text-slate-900 font-medium{% else %}text-slate-500{% endif %}">Objections</a>
+                <a href="/ui/therapist-mode" class="hover:text-slate-900 {% if active=='therapist' %}text-slate-900 font-medium{% else %}text-slate-500{% endif %}">Therapist Mode</a>
+                <a href="/ui/reports" class="hover:text-slate-900 {% if active=='reports' %}text-slate-900 font-medium{% else %}text-slate-500{% endif %}">Reports</a>
+            </nav>
+        </div>
+    </header>
+
+    <main class="mx-auto max-w-7xl px-6 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="mx-auto max-w-7xl px-6 py-6 text-xs text-slate-400">
+        Sales Coach · powered by Claude
+    </footer>
+</body>
+</html>

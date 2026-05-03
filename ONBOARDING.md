@@ -170,16 +170,46 @@ nano /srv/caddy/Caddyfile
 ```
 
 Inside the `api.{$DOMAIN} { ... }` block, add a new `handle_path` block
-**before** the default `handle { respond ... }`:
+**before** the default `handle { respond ... }`. The UI gets its own
+sub-block with HTTP basicauth so only the leadership users (CEO, Sales
+Manager, Client Manager) can access the dashboard:
 
 ```caddy
 # ── <Client Display Name> ────────────────────────────────────────────
 handle_path /colt/* {
+    # Management UI — basicauth-gated for the 3 leadership users.
+    # Generate the password hash with:
+    #   docker compose exec caddy caddy hash-password
+    # Paste the resulting "$2a$..." string after the username below.
+    @colt_ui path /ui /ui/*
+    handle @colt_ui {
+        basicauth {
+            colt $2a$14$REPLACE_WITH_CADDY_HASH_PASSWORD_OUTPUT
+        }
+        reverse_proxy colt_api:8000 {
+            header_up X-Real-IP {remote_host}
+        }
+    }
+    # Webhooks + health endpoints — no auth (webhook URL is the secret)
     reverse_proxy colt_api:8000 {
         header_up X-Real-IP {remote_host}
     }
 }
 ```
+
+**Generating the basicauth password hash:**
+
+```bash
+cd /srv/caddy
+docker compose exec caddy caddy hash-password
+# Type a password when prompted (use a password manager — share with the 3 users)
+# Copy the entire $2a$... string into the basicauth line above
+```
+
+The username (`colt` in the example) can be anything — all three leadership
+users share the same credentials. If you ever need per-user accounts, you'd
+swap to Supabase Auth, but for read-only management dashboards shared
+basicauth is the right tradeoff.
 
 Reload Caddy so it picks up the new route:
 
@@ -193,8 +223,23 @@ docker compose restart caddy
 Sanity check from outside the VPS:
 
 ```bash
+# Public endpoints (webhooks + health) — should return 200 without auth
 curl -sI https://api.gogrowlabs.com/colt/health/ready
 # Expect: HTTP/2 200
+
+# UI — should return 401 without credentials, 200 with them
+curl -sI https://api.gogrowlabs.com/colt/ui/
+# Expect: HTTP/2 401
+
+curl -sI -u colt:THE_PASSWORD https://api.gogrowlabs.com/colt/ui/
+# Expect: HTTP/2 200
+```
+
+Once verified, the management dashboard URL to share with the client's
+leadership team is:
+
+```
+https://api.gogrowlabs.com/colt/ui/
 ```
 
 ---
