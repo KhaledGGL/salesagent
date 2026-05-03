@@ -19,7 +19,7 @@ class TestScoreColorClass:
         assert "rose" in h.score_color_class(1)
 
     def test_none_is_neutral(self):
-        assert "slate" in h.score_color_class(None)
+        assert "zinc" in h.score_color_class(None)
 
 
 class TestOutcome:
@@ -34,7 +34,7 @@ class TestOutcome:
 
     def test_unknown_outcome_falls_back(self):
         cls = h.outcome_badge_class("anything-weird")
-        assert "slate" in cls
+        assert "zinc" in cls
 
     @pytest.mark.parametrize("v,expected", [
         ("sold", "Sold"),
@@ -53,8 +53,8 @@ class TestSeverityAndCategory:
     def test_severity_class_distinct_per_level(self):
         assert "rose" in h.severity_class("high")
         assert "amber" in h.severity_class("medium")
-        assert "slate" in h.severity_class("low")
-        assert "slate" in h.severity_class(None)
+        assert "zinc" in h.severity_class("low")
+        assert "zinc" in h.severity_class(None)
 
     def test_category_label_humanized(self):
         assert h.category_label("objection_handling") == "Objection Handling"

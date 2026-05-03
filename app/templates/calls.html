@@ -1,13 +1,159 @@
 {% extends "base.html" %}
 {% block title %}Calls{% endblock %}
 {% block content %}
-<div class="space-y-6">
+
+{# ── Header ───────────────────────────────────────────────────────────── #}
+<div class="mb-6 flex items-end justify-between gap-4 flex-wrap">
     <div>
-        <h1 class="text-2xl font-semibold text-slate-900">Calls</h1>
-        <p class="mt-1 text-sm text-slate-500">Filter, sort, and drill into any scored call.</p>
-    </div>
-    <div class="rounded-lg border border-dashed border-slate-300 bg-white p-12 text-center text-slate-400">
-        Calls list coming next — filterable by rep, date, score, outcome, source.
+        <h1 class="text-2xl font-semibold tracking-tight text-white">Calls</h1>
+        <p class="mt-1 text-sm text-zinc-400">
+            {{ total }} call{{ '' if total == 1 else 's' }} · last {{ filters.days }} day{{ '' if filters.days == 1 else 's' }}
+        </p>
     </div>
 </div>
+
+{# ── Filter bar ───────────────────────────────────────────────────────── #}
+<form method="get" action="/ui/calls"
+      class="mb-6 flex flex-wrap items-end gap-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+
+    <div class="flex flex-col gap-1.5">
+        <label class="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Rep</label>
+        <select name="rep_id"
+                class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500">
+            <option value="" {% if not filters.rep_id %}selected{% endif %}>All reps</option>
+            {% for r in reps %}
+                <option value="{{ r.id }}" {% if filters.rep_id == r.id %}selected{% endif %}>{{ r.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="flex flex-col gap-1.5">
+        <label class="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Outcome</label>
+        <select name="outcome"
+                class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500">
+            <option value="" {% if not filters.outcome %}selected{% endif %}>All outcomes</option>
+            <option value="sold"      {% if filters.outcome == 'sold' %}selected{% endif %}>Sold</option>
+            <option value="follow_up" {% if filters.outcome == 'follow_up' %}selected{% endif %}>Follow-up</option>
+            <option value="not_sold"  {% if filters.outcome == 'not_sold' %}selected{% endif %}>Not sold</option>
+            <option value="no_show"   {% if filters.outcome == 'no_show' %}selected{% endif %}>No show</option>
+        </select>
+    </div>
+
+    <div class="flex flex-col gap-1.5">
+        <label class="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Source</label>
+        <select name="source"
+                class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500">
+            <option value="" {% if not filters.source %}selected{% endif %}>All sources</option>
+            <option value="meta"    {% if filters.source == 'meta' %}selected{% endif %}>Meta</option>
+            <option value="google"  {% if filters.source == 'google' %}selected{% endif %}>Google</option>
+            <option value="organic" {% if filters.source == 'organic' %}selected{% endif %}>Organic</option>
+        </select>
+    </div>
+
+    <div class="flex flex-col gap-1.5">
+        <label class="text-[11px] font-medium uppercase tracking-wider text-zinc-500">Window</label>
+        <select name="days"
+                class="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 focus:border-zinc-500 focus:outline-none focus:ring-1 focus:ring-zinc-500">
+            {% for d, label in [(7, '7 days'), (30, '30 days'), (90, '90 days'), (365, '1 year')] %}
+                <option value="{{ d }}" {% if filters.days == d %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <button type="submit"
+            class="rounded-md bg-zinc-100 px-4 py-1.5 text-sm font-medium text-zinc-900 hover:bg-white transition">
+        Apply
+    </button>
+    {% if filters.rep_id or filters.outcome or filters.source or filters.days != 30 %}
+        <a href="/ui/calls" class="text-sm text-zinc-400 hover:text-zinc-200 transition">Reset</a>
+    {% endif %}
+</form>
+
+{# ── Table ────────────────────────────────────────────────────────────── #}
+{% if calls %}
+<div class="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60">
+    <table class="min-w-full divide-y divide-zinc-800">
+        <thead class="bg-zinc-900/80">
+            <tr class="text-left text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                <th class="px-4 py-3">When</th>
+                <th class="px-4 py-3">Rep</th>
+                <th class="px-4 py-3">Lead</th>
+                <th class="px-4 py-3">Source</th>
+                <th class="px-4 py-3">Outcome</th>
+                <th class="px-4 py-3 text-right">Score</th>
+                <th class="px-4 py-3"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-800/60">
+            {% for c in calls %}
+                {% set rep = c.reps or {} %}
+                {% set sc = (c.call_scores or [{}])[0] %}
+                <tr onclick="window.location='/ui/calls/{{ c.id }}'"
+                    class="cursor-pointer hover:bg-zinc-800/40 transition">
+                    <td class="px-4 py-3 text-sm text-zinc-300 whitespace-nowrap tabular-nums">
+                        {% if c.called_at %}{{ c.called_at[:16].replace('T', ' ') }}{% else %}—{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-zinc-200 font-medium">
+                        {{ rep.name or 'Unknown' }}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-zinc-300">
+                        {{ c.lead_name or '—' }}
+                    </td>
+                    <td class="px-4 py-3 text-sm text-zinc-400">
+                        {{ c.lead_source or '—' }}
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset {{ h.outcome_badge_class(c.outcome) }}">
+                            {{ h.outcome_label(c.outcome) }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                        {% if sc and sc.overall_score is not none %}
+                            <span class="inline-flex items-center justify-center min-w-[2.5rem] rounded-md px-2 py-1 text-sm font-semibold tabular-nums ring-1 ring-inset {{ h.score_color_class(sc.overall_score) }}">{{ sc.overall_score }}</span>
+                            {% if sc.therapist_mode_flag %}<span class="ml-1 text-rose-400" title="Therapist mode flagged">🛑</span>{% endif %}
+                        {% else %}<span class="text-xs text-zinc-500">{{ c.status }}</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-right text-zinc-600">→</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-12 text-center text-zinc-500">
+    No calls match these filters.
+</div>
+{% endif %}
+
+{# ── Pagination ───────────────────────────────────────────────────────── #}
+{% if total_pages > 1 %}
+<div class="mt-4 flex items-center justify-between text-sm text-zinc-400">
+    <div>
+        Page {{ page }} of {{ total_pages }}
+        <span class="text-zinc-600">·</span>
+        Showing {{ ((page - 1) * per_page) + 1 }}–{{ ((page - 1) * per_page) + calls|length }} of {{ total }}
+    </div>
+    <div class="flex gap-2">
+        {% set base_qs = '?' %}
+        {% if filters.rep_id %}{% set base_qs = base_qs ~ 'rep_id=' ~ filters.rep_id ~ '&' %}{% endif %}
+        {% if filters.outcome %}{% set base_qs = base_qs ~ 'outcome=' ~ filters.outcome ~ '&' %}{% endif %}
+        {% if filters.source %}{% set base_qs = base_qs ~ 'source=' ~ filters.source ~ '&' %}{% endif %}
+        {% if filters.days %}{% set base_qs = base_qs ~ 'days=' ~ filters.days ~ '&' %}{% endif %}
+
+        {% if page > 1 %}
+            <a href="/ui/calls{{ base_qs }}page={{ page - 1 }}"
+               class="rounded-md border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800 transition">← Prev</a>
+        {% else %}
+            <span class="rounded-md border border-zinc-800 px-3 py-1.5 text-zinc-600">← Prev</span>
+        {% endif %}
+        {% if page < total_pages %}
+            <a href="/ui/calls{{ base_qs }}page={{ page + 1 }}"
+               class="rounded-md border border-zinc-700 px-3 py-1.5 hover:bg-zinc-800 transition">Next →</a>
+        {% else %}
+            <span class="rounded-md border border-zinc-800 px-3 py-1.5 text-zinc-600">Next →</span>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
 {% endblock %}

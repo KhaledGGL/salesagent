@@ -10,6 +10,7 @@ Phase 1 status: route stubs only. Each page renders its template with the
 shared base layout; data wiring lands in Phase 2.
 """
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
@@ -18,6 +19,10 @@ from fastapi.templating import Jinja2Templates
 
 from app.db import get_supabase
 from app.ui import helpers
+
+# Page size for the calls list. Big enough that most weeks fit on one page,
+# small enough that the page renders fast even on a fresh DB.
+CALLS_PER_PAGE = 25
 
 # templates/ lives at app/templates/, this file at app/ui/routes.py
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
@@ -46,8 +51,73 @@ async def dashboard(request: Request) -> HTMLResponse:
 
 
 @router.get("/calls", response_class=HTMLResponse)
-async def calls_list(request: Request) -> HTMLResponse:
-    return _render(request, "calls.html", active="calls")
+async def calls_list(
+    request: Request,
+    rep_id: str | None = None,
+    outcome: str | None = None,
+    source: str | None = None,
+    days: int = 30,
+    page: int = 1,
+) -> HTMLResponse:
+    """Filterable, paginated list of recent calls.
+
+    Filters are passed as query params so each combination is a
+    bookmarkable URL — no HTMX needed for v1, plain GET form submit.
+    """
+    db = get_supabase()
+
+    # Reps for the filter dropdown — small table, one round-trip.
+    reps = db.table("reps").select("id, name").order("name").execute().data or []
+
+    # Time window — default 30 days mirrors v_rep_performance_30d.
+    cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=max(days, 1))).isoformat()
+
+    # Base query. We embed the rep name + just the score fields the table
+    # row needs (avoid pulling the full scorecard into a list view).
+    q = (
+        db.table("calls")
+        .select(
+            "id, lead_name, lead_source, outcome, called_at, status, rep_id, "
+            "reps(name), call_scores(overall_score, therapist_mode_flag)",
+            count="exact",
+        )
+        .gte("called_at", cutoff_iso)
+        .order("called_at", desc=True)
+    )
+    if rep_id:
+        q = q.eq("rep_id", rep_id)
+    if outcome:
+        q = q.eq("outcome", outcome)
+    if source:
+        q = q.eq("lead_source", source)
+
+    # Pagination via .range — Supabase translates this to LIMIT/OFFSET.
+    page = max(page, 1)
+    start = (page - 1) * CALLS_PER_PAGE
+    q = q.range(start, start + CALLS_PER_PAGE - 1)
+
+    resp = q.execute()
+    calls = resp.data or []
+    total = getattr(resp, "count", None) or 0
+    total_pages = max((total + CALLS_PER_PAGE - 1) // CALLS_PER_PAGE, 1)
+
+    return _render(
+        request,
+        "calls.html",
+        active="calls",
+        calls=calls,
+        reps=reps,
+        filters={
+            "rep_id": rep_id or "",
+            "outcome": outcome or "",
+            "source": source or "",
+            "days": days,
+        },
+        page=page,
+        total=total,
+        total_pages=total_pages,
+        per_page=CALLS_PER_PAGE,
+    )
 
 
 @router.get("/calls/{call_id}", response_class=HTMLResponse)

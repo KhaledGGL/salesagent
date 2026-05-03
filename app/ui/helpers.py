@@ -4,6 +4,9 @@ Kept as pure functions so they're trivial to unit-test and don't need
 template-engine context. Each helper returns a Tailwind class string or
 a formatted display value — never HTML, so templates stay in charge of
 markup.
+
+Color palette is the dark-mode professional palette (zinc-base body
+with translucent accent fills using color-500/10 + color-500/20 rings).
 """
 
 from __future__ import annotations
@@ -11,24 +14,24 @@ from __future__ import annotations
 
 # ── Score → color class (matches the Slack scorecard emoji thresholds) ──────
 #
-# 8-10 = green (good), 5-7 = yellow (mediocre), 1-4 = red (bad). Same
-# bands the scorecard message uses so reps see consistent signaling
+# 8-10 = emerald (good), 5-7 = amber (mediocre), 1-4 = rose (bad).
+# Same bands the scorecard message uses so reps see consistent signaling
 # whether they're reading Slack or the dashboard.
 
 def score_color_class(score: int | None) -> str:
     if score is None:
-        return "text-slate-400 bg-slate-100"
+        return "text-zinc-400 bg-zinc-800/60 ring-zinc-700/60"
     if score >= 8:
-        return "text-emerald-700 bg-emerald-50"
+        return "text-emerald-400 bg-emerald-500/10 ring-emerald-500/20"
     if score >= 5:
-        return "text-amber-700 bg-amber-50"
-    return "text-rose-700 bg-rose-50"
+        return "text-amber-400 bg-amber-500/10 ring-amber-500/20"
+    return "text-rose-400 bg-rose-500/10 ring-rose-500/20"
 
 
 def score_dot_class(score: int | None) -> str:
     """Just the dot color for tight score badges."""
     if score is None:
-        return "bg-slate-300"
+        return "bg-zinc-500"
     if score >= 8:
         return "bg-emerald-500"
     if score >= 5:
@@ -36,16 +39,16 @@ def score_dot_class(score: int | None) -> str:
     return "bg-rose-500"
 
 
-# ── Outcome → badge class (sold / not_sold / follow_up are the AI-derived ones) ─
+# ── Outcome → badge class (sold / not_sold / follow_up are AI-derived) ──────
 
 def outcome_badge_class(outcome: str | None) -> str:
     return {
-        "sold":         "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-        "not_sold":     "bg-rose-50 text-rose-700 ring-rose-600/20",
-        "follow_up":    "bg-amber-50 text-amber-700 ring-amber-600/20",
-        "no_show":      "bg-slate-100 text-slate-600 ring-slate-500/20",
-        "rescheduled": "bg-sky-50 text-sky-700 ring-sky-600/20",
-    }.get(outcome or "", "bg-slate-50 text-slate-500 ring-slate-400/20")
+        "sold":         "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20",
+        "not_sold":     "bg-rose-500/10 text-rose-400 ring-rose-500/20",
+        "follow_up":    "bg-amber-500/10 text-amber-400 ring-amber-500/20",
+        "no_show":      "bg-zinc-800/60 text-zinc-400 ring-zinc-700/60",
+        "rescheduled":  "bg-sky-500/10 text-sky-400 ring-sky-500/20",
+    }.get(outcome or "", "bg-zinc-800/60 text-zinc-400 ring-zinc-700/60")
 
 
 def outcome_label(outcome: str | None) -> str:
@@ -62,10 +65,10 @@ def outcome_label(outcome: str | None) -> str:
 
 def severity_class(severity: str | None) -> str:
     return {
-        "high":   "bg-rose-50 text-rose-700 ring-rose-600/20",
-        "medium": "bg-amber-50 text-amber-700 ring-amber-600/20",
-        "low":    "bg-slate-100 text-slate-600 ring-slate-500/20",
-    }.get(severity or "", "bg-slate-100 text-slate-600 ring-slate-500/20")
+        "high":   "bg-rose-500/10 text-rose-400 ring-rose-500/20",
+        "medium": "bg-amber-500/10 text-amber-400 ring-amber-500/20",
+        "low":    "bg-zinc-800/60 text-zinc-400 ring-zinc-700/60",
+    }.get(severity or "", "bg-zinc-800/60 text-zinc-400 ring-zinc-700/60")
 
 
 def category_label(category: str | None) -> str:
@@ -77,11 +80,11 @@ def category_label(category: str | None) -> str:
 
 def handling_quality_class(quality: str | None) -> str:
     return {
-        "excellent": "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-        "good":      "bg-sky-50 text-sky-700 ring-sky-600/20",
-        "fair":      "bg-amber-50 text-amber-700 ring-amber-600/20",
-        "poor":      "bg-rose-50 text-rose-700 ring-rose-600/20",
-    }.get(quality or "", "bg-slate-100 text-slate-600 ring-slate-500/20")
+        "excellent": "bg-emerald-500/10 text-emerald-400 ring-emerald-500/20",
+        "good":      "bg-sky-500/10 text-sky-400 ring-sky-500/20",
+        "fair":      "bg-amber-500/10 text-amber-400 ring-amber-500/20",
+        "poor":      "bg-rose-500/10 text-rose-400 ring-rose-500/20",
+    }.get(quality or "", "bg-zinc-800/60 text-zinc-400 ring-zinc-700/60")
 
 
 # ── Misc formatters ─────────────────────────────────────────────────────────

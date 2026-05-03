@@ -19,13 +19,13 @@ def client():
 # ── Each route returns 200 with HTML and the shared shell ───────────────────
 
 # Routes that don't need a DB — pure stub or path-arg-only.
-# /ui/calls/:id has its own dedicated test file (test_ui_call_detail.py)
-# because it queries Supabase and needs full mocking.
+# /ui/calls and /ui/calls/:id have their own dedicated test files
+# (test_ui_calls_list.py / test_ui_call_detail.py) because they query
+# Supabase and need full mocking.
 @pytest.mark.parametrize(
     "path",
     [
         "/ui/",
-        "/ui/calls",
         "/ui/reps",
         "/ui/reps/rep-uuid",
         "/ui/sources",
@@ -64,7 +64,6 @@ def test_route_returns_200_html(client, path):
     "path,expected_active",
     [
         ("/ui/", "Overview"),
-        ("/ui/calls", "Calls"),
         ("/ui/reps", "Reps"),
         ("/ui/reps/abc", "Reps"),
         ("/ui/sources", "Sources"),
@@ -75,12 +74,7 @@ def test_route_returns_200_html(client, path):
 )
 def test_active_nav_highlight(client, path, expected_active):
     body = client.get(path).text
-    # font-medium is the tailwind class our template applies to the active link
-    # — find it adjacent to the expected nav label.
-    assert f"font-medium" in body
-    # Crude but effective: the active label should appear near the
-    # font-medium class in the nav block. Search for the label inside an
-    # anchor tagged with font-medium.
+    # The active link wraps its label in a <span class="font-medium">…</span>
     needle = f'font-medium">{expected_active}'
     assert needle in body, f"{path} should highlight {expected_active!r}"
 
@@ -103,3 +97,13 @@ def test_base_layout_loads_required_cdn_scripts(client):
     assert "htmx.org" in body
     # Chart.js is there for the trend graphs the dashboard will render
     assert "chart.js" in body.lower()
+
+
+# ── Dark-mode visual smoke check ────────────────────────────────────────────
+# We intentionally chose a zinc-based dark palette. If someone accidentally
+# regresses to a light theme (bg-white body, etc.) this test catches it.
+
+def test_base_layout_uses_dark_zinc_palette(client):
+    body = client.get("/ui/").text
+    assert "bg-zinc-950" in body, "body should be on the dark zinc-950 background"
+    assert 'class="dark"' in body, "html element should be marked .dark for any future tailwind dark: variants"
