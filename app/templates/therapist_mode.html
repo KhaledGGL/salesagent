@@ -58,7 +58,7 @@
     <ul class="mt-4 space-y-2">
         {% for f in flagged %}
             {% set rep = f.reps or {} %}
-            {% set sc = (f.call_scores or [{}])[0] %}
+            {% set sc = h.first_or_dict(f.call_scores) or {} %}
             <li>
                 <a href="{{ URL_PREFIX }}/ui/calls/{{ f.id }}"
                    class="block rounded-lg border border-rose-500/20 bg-rose-500/5 px-4 py-3 hover:bg-rose-500/10 transition">

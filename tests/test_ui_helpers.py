@@ -70,6 +70,26 @@ class TestHandlingQuality:
         assert "rose" in h.handling_quality_class("poor")
 
 
+class TestFirstOrDict:
+    """Supabase embeds: list (one-to-many) vs dict (one-to-one with UNIQUE FK).
+    The helper must normalize both to a single row or None — regression test
+    for the 500 we hit in production where call_scores came back as a dict
+    and `(call_scores or [{}])[0]` did dict[0] → KeyError: 0."""
+
+    def test_dict_input_returned_as_is(self):
+        d = {"overall_score": 8}
+        assert h.first_or_dict(d) is d
+
+    def test_list_input_returns_first(self):
+        assert h.first_or_dict([{"overall_score": 8}, {"overall_score": 5}]) == {"overall_score": 8}
+
+    def test_empty_list_returns_none(self):
+        assert h.first_or_dict([]) is None
+
+    def test_none_input_returns_none(self):
+        assert h.first_or_dict(None) is None
+
+
 class TestFormatters:
     @pytest.mark.parametrize("seconds,expected", [
         (0, "0:00"),

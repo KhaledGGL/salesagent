@@ -112,3 +112,20 @@ def format_duration_minutes(seconds: int | float | None) -> str:
     if s < 60:
         return f"{s}s"
     return f"{s // 60}m {s % 60:02d}s"
+
+
+# ── Supabase embed-shape normalizer ─────────────────────────────────────────
+
+def first_or_dict(value):
+    """Normalize a Supabase embedded resource to a single row or None.
+
+    PostgREST / supabase-py returns embeds as either a list (one-to-many)
+    or a single dict (one-to-one when the foreign key has a UNIQUE
+    constraint, e.g. call_scores.call_id). Templates and routes need to
+    handle both shapes — this helper does that uniformly.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value[0] if value else None
+    return value

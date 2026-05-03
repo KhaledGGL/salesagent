@@ -214,9 +214,10 @@ async def call_detail(request: Request, call_id: str) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="Call not found")
 
     call = call_resp.data
-    score_rows = call.get("call_scores") or []
-    # Supabase returns the embedded join as a list; pick the first row if any.
-    score = score_rows[0] if score_rows else None
+    # Supabase embeds call_scores as a single dict (UNIQUE FK) — but it can
+    # also come back as a list depending on supabase-py version / query.
+    # The helper normalizes both shapes.
+    score = helpers.first_or_dict(call.get("call_scores"))
 
     coaching = (
         db.table("coaching_moments")
@@ -316,7 +317,7 @@ async def rep_detail(request: Request, rep_id: str) -> HTMLResponse:
     # Flatten the score join so the template can iterate cleanly
     timeline = []
     for c in scored_calls:
-        sc = (c.get("call_scores") or [{}])[0]
+        sc = helpers.first_or_dict(c.get("call_scores")) or {}
         if not sc:
             continue
         timeline.append({

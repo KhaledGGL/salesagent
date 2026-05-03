@@ -182,7 +182,7 @@
     <ul class="space-y-1.5">
         {% for c in recent_calls %}
             {% set rep = c.reps or {} %}
-            {% set sc = (c.call_scores or [{}])[0] %}
+            {% set sc = h.first_or_dict(c.call_scores) or {} %}
             <li>
                 <a href="{{ URL_PREFIX }}/ui/calls/{{ c.id }}"
                    class="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5 hover:bg-zinc-800/40 transition">
