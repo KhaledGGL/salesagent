@@ -18,12 +18,14 @@ def client():
 
 # ── Each route returns 200 with HTML and the shared shell ───────────────────
 
+# Routes that don't need a DB — pure stub or path-arg-only.
+# /ui/calls/:id has its own dedicated test file (test_ui_call_detail.py)
+# because it queries Supabase and needs full mocking.
 @pytest.mark.parametrize(
     "path",
     [
         "/ui/",
         "/ui/calls",
-        "/ui/calls/abc-123",
         "/ui/reps",
         "/ui/reps/rep-uuid",
         "/ui/sources",
@@ -56,12 +58,13 @@ def test_route_returns_200_html(client, path):
 
 # ── Active-tab highlighting (the small but important detail) ────────────────
 
+# /ui/calls/:id active-tab check lives in test_ui_call_detail.py
+# since that page needs DB mocks.
 @pytest.mark.parametrize(
     "path,expected_active",
     [
         ("/ui/", "Overview"),
         ("/ui/calls", "Calls"),
-        ("/ui/calls/abc", "Calls"),       # detail page should highlight parent
         ("/ui/reps", "Reps"),
         ("/ui/reps/abc", "Reps"),
         ("/ui/sources", "Sources"),
@@ -83,11 +86,7 @@ def test_active_nav_highlight(client, path, expected_active):
 
 
 # ── Detail pages surface their ID parameter (proof the path arg is wired) ───
-
-def test_call_detail_renders_call_id(client):
-    body = client.get("/ui/calls/uuid-abc-123").text
-    assert "uuid-abc-123" in body
-
+# /ui/calls/:id is covered in test_ui_call_detail.py with proper DB mocks.
 
 def test_rep_detail_renders_rep_id(client):
     body = client.get("/ui/reps/rep-9").text

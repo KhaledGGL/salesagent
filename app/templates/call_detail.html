@@ -1,14 +1,168 @@
 {% extends "base.html" %}
-{% block title %}Call Detail{% endblock %}
+{% block title %}Call · {{ rep_name }}{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div>
-        <a href="/ui/calls" class="text-sm text-slate-500 hover:text-slate-900">← Back to calls</a>
-        <h1 class="mt-2 text-2xl font-semibold text-slate-900">Call Detail</h1>
-        <p class="mt-1 text-sm text-slate-500">ID: <code class="rounded bg-slate-100 px-1.5 py-0.5 text-xs">{{ call_id }}</code></p>
-    </div>
-    <div class="rounded-lg border border-dashed border-slate-300 bg-white p-12 text-center text-slate-400">
-        Transcript + scorecard + coaching moments + objections coming next.
-    </div>
+
+{# ── Back link + header ─────────────────────────────────────────────── #}
+<div class="mb-6">
+    <a href="/ui/calls" class="text-sm text-slate-500 hover:text-slate-900">← Back to calls</a>
 </div>
+
+<div class="space-y-6">
+    {# ── Top card: rep + lead + outcome + duration ───────────────────── #}
+    <section class="rounded-xl border border-slate-200 bg-white p-6">
+        <div class="flex items-start justify-between gap-6 flex-wrap">
+            <div>
+                <h1 class="text-2xl font-semibold text-slate-900">{{ rep_name }}</h1>
+                <p class="mt-1 text-sm text-slate-500">
+                    {% if call.lead_name %}Lead: <span class="text-slate-700">{{ call.lead_name }}</span>{% else %}Lead unknown{% endif %}
+                    {% if call.lead_source %}· Source: <span class="text-slate-700">{{ call.lead_source }}</span>{% endif %}
+                    {% if call.lead_temperature %}· {{ call.lead_temperature|capitalize }}{% endif %}
+                    {% if call.called_at %}· {{ call.called_at[:10] }}{% endif %}
+                    · Duration {{ h.format_duration_minutes(call.duration_seconds) }}
+                </p>
+            </div>
+
+            {# Outcome pill + confidence + recording link #}
+            <div class="flex items-center gap-3">
+                <span class="inline-flex items-center rounded-full px-3 py-1 text-sm font-medium ring-1 ring-inset {{ h.outcome_badge_class(call.outcome) }}">
+                    {{ h.outcome_label(call.outcome) }}
+                    {% if score and score.outcome_confidence is not none %}
+                        <span class="ml-1.5 text-xs opacity-75">{{ h.format_confidence_pct(score.outcome_confidence) }}</span>
+                    {% endif %}
+                </span>
+                {% if call.recording_url %}
+                    <a href="{{ call.recording_url }}" target="_blank" rel="noopener"
+                       class="inline-flex items-center rounded-md bg-slate-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-800">
+                        ▶ Listen
+                    </a>
+                {% endif %}
+            </div>
+        </div>
+
+        {# Outcome evidence — the "why" behind Claude's classification #}
+        {% if score and score.outcome_evidence %}
+            <p class="mt-4 text-sm italic text-slate-600 border-l-2 border-slate-200 pl-3">
+                {{ score.outcome_evidence }}
+            </p>
+        {% endif %}
+    </section>
+
+    {# ── Not-yet-scored shortcut ──────────────────────────────────────── #}
+    {% if not score %}
+        <section class="rounded-xl border border-amber-200 bg-amber-50 p-6 text-amber-900">
+            <p class="text-sm font-medium">This call hasn't been scored yet.</p>
+            <p class="mt-1 text-xs">Status: <code>{{ call.status }}</code>{% if call.error_message %} · {{ call.error_message }}{% endif %}</p>
+        </section>
+    {% else %}
+
+    {# ── Score grid + overall badge ───────────────────────────────────── #}
+    <section class="rounded-xl border border-slate-200 bg-white p-6">
+        <div class="flex items-center gap-6 flex-wrap">
+            <div class="flex flex-col items-center justify-center w-24 h-24 rounded-2xl {{ h.score_color_class(score.overall_score) }}">
+                <span class="text-3xl font-bold leading-none">{{ score.overall_score }}</span>
+                <span class="mt-1 text-xs uppercase tracking-wide opacity-75">overall</span>
+            </div>
+
+            <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 flex-1">
+                {% for label, val in [
+                    ("Rapport", score.rapport_score),
+                    ("Diagnosis", score.diagnosis_score),
+                    ("Objection", score.objection_score),
+                    ("Close", score.close_score),
+                    ("Compliance", score.compliance_score),
+                ] %}
+                <div class="rounded-lg p-3 {{ h.score_color_class(val) }}">
+                    <div class="text-xs uppercase tracking-wide opacity-75">{{ label }}</div>
+                    <div class="mt-1 text-2xl font-semibold">{{ val }}<span class="text-xs opacity-50">/10</span></div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
+    {# ── AI summary + therapist mode banner ──────────────────────────── #}
+    <section class="rounded-xl border border-slate-200 bg-white p-6">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Summary</h2>
+        <p class="mt-2 text-sm leading-relaxed text-slate-700">{{ score.ai_summary }}</p>
+
+        {% if score.therapist_mode_flag %}
+            <div class="mt-4 rounded-lg bg-rose-50 border border-rose-200 px-4 py-3 text-sm text-rose-800">
+                <p class="font-medium">🛑 Therapist mode triggered</p>
+                <p class="mt-1 italic text-rose-700">{{ score.therapist_mode_reason or 'See coaching moments for details.' }}</p>
+            </div>
+        {% endif %}
+
+        {% if score.win_loss_description %}
+            <div class="mt-4 rounded-lg bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-700">
+                <p class="font-medium text-slate-900">🎯 Key moment <span class="text-xs text-slate-400 font-normal">at {{ h.format_seconds_to_mmss(score.win_loss_timestamp) }}</span></p>
+                <p class="mt-1">{{ score.win_loss_description }}</p>
+            </div>
+        {% endif %}
+    </section>
+
+    {# ── Two-column: coaching + objections | transcript ──────────────── #}
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {# Left: coaching moments + objections #}
+        <div class="space-y-6">
+            <section class="rounded-xl border border-slate-200 bg-white p-6">
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                    Coaching moments
+                    {% if coaching %}<span class="ml-1 text-slate-400 font-normal normal-case">· {{ coaching|length }}</span>{% endif %}
+                </h2>
+                {% if coaching %}
+                    <ul class="mt-3 space-y-3">
+                        {% for m in coaching %}
+                            <li class="rounded-lg bg-slate-50 px-4 py-3">
+                                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                                    <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ring-1 ring-inset {{ h.severity_class(m.severity) }}">{{ m.severity|capitalize }}</span>
+                                    <span class="text-xs font-medium text-slate-700">{{ h.category_label(m.category) }}</span>
+                                    <span class="text-xs text-slate-400">at {{ h.format_seconds_to_mmss(m.timestamp_seconds) }}</span>
+                                </div>
+                                <p class="text-sm text-slate-700">{{ m.note }}</p>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="mt-3 text-sm text-slate-400">No coaching moments flagged.</p>
+                {% endif %}
+            </section>
+
+            <section class="rounded-xl border border-slate-200 bg-white p-6">
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">
+                    Objections
+                    {% if objections %}<span class="ml-1 text-slate-400 font-normal normal-case">· {{ objections|length }}</span>{% endif %}
+                </h2>
+                {% if objections %}
+                    <ul class="mt-3 space-y-3">
+                        {% for o in objections %}
+                            <li class="rounded-lg bg-slate-50 px-4 py-3">
+                                <div class="flex items-center gap-2 mb-1 flex-wrap">
+                                    <span class="text-xs font-medium text-slate-700">{{ o.objection_type|capitalize }}</span>
+                                    <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ring-1 ring-inset {{ h.handling_quality_class(o.handling_quality) }}">{{ o.handling_quality|capitalize }}</span>
+                                    <span class="text-xs text-slate-400">at {{ h.format_seconds_to_mmss(o.timestamp_seconds) }}</span>
+                                </div>
+                                <p class="text-sm italic text-slate-700">"{{ o.objection_text }}"</p>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="mt-3 text-sm text-slate-400">No objections raised.</p>
+                {% endif %}
+            </section>
+        </div>
+
+        {# Right: transcript #}
+        <section class="rounded-xl border border-slate-200 bg-white p-6">
+            <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Transcript</h2>
+            {% if call.transcript %}
+                <div class="mt-3 max-h-[40rem] overflow-y-auto whitespace-pre-wrap text-sm leading-relaxed text-slate-700 font-mono bg-slate-50 rounded-lg p-4">{{ call.transcript }}</div>
+            {% else %}
+                <p class="mt-3 text-sm text-slate-400">No transcript available.</p>
+            {% endif %}
+        </section>
+    </div>
+
+    {% endif %}
+</div>
+
 {% endblock %}

@@ -12,13 +12,20 @@ shared base layout; data wiring lands in Phase 2.
 
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+
+from app.db import get_supabase
+from app.ui import helpers
 
 # templates/ lives at app/templates/, this file at app/ui/routes.py
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+# Wire helpers into the Jinja env so templates can call them directly
+# without each route having to pass them as context kwargs.
+templates.env.globals["h"] = helpers
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
@@ -45,7 +52,61 @@ async def calls_list(request: Request) -> HTMLResponse:
 
 @router.get("/calls/{call_id}", response_class=HTMLResponse)
 async def call_detail(request: Request, call_id: str) -> HTMLResponse:
-    return _render(request, "call_detail.html", active="calls", call_id=call_id)
+    """Full picture of a single scored call: scorecard + AI summary +
+    coaching moments + objections + transcript. The page Sales Manager
+    actually does coaching from."""
+    db = get_supabase()
+
+    # Match the join pattern used by notify_scorecard so we hit a single
+    # round-trip for the parent + scorecard + rep, then a couple more
+    # for the child collections (which have their own ordering).
+    call_resp = (
+        db.table("calls")
+        .select("*, reps(name), call_scores(*)")
+        .eq("id", call_id)
+        .maybe_single()
+        .execute()
+    )
+
+    # supabase-py 2.28+ returns None directly when no row matches.
+    if call_resp is None or not call_resp.data:
+        raise HTTPException(status_code=404, detail="Call not found")
+
+    call = call_resp.data
+    score_rows = call.get("call_scores") or []
+    # Supabase returns the embedded join as a list; pick the first row if any.
+    score = score_rows[0] if score_rows else None
+
+    coaching = (
+        db.table("coaching_moments")
+        .select("*")
+        .eq("call_id", call_id)
+        .order("timestamp_seconds")
+        .execute()
+        .data
+        or []
+    )
+    objections = (
+        db.table("call_objections")
+        .select("*")
+        .eq("call_id", call_id)
+        .order("timestamp_seconds")
+        .execute()
+        .data
+        or []
+    )
+
+    return _render(
+        request,
+        "call_detail.html",
+        active="calls",
+        call_id=call_id,
+        call=call,
+        rep_name=(call.get("reps") or {}).get("name") or "Unknown rep",
+        score=score,
+        coaching=coaching,
+        objections=objections,
+    )
 
 
 @router.get("/reps", response_class=HTMLResponse)
