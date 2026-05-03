@@ -128,8 +128,11 @@ SUPABASE_SERVICE_KEY=sb_secret_...
 
 REDIS_URL=redis://redis:6379/0     # internal docker hostname, leave as-is
 
-GHL_API_KEY=pit-<their-private-integration-token>
-GHL_LOCATION_ID=<their-sub-account-location-id>
+# GHL API credentials are no longer required — the inline-transcript
+# webhook + UTM merge tags carries everything the app needs. Leave
+# blank unless you're re-introducing a feature that reaches into GHL.
+# GHL_API_KEY=
+# GHL_LOCATION_ID=
 
 ANTHROPIC_API_KEY=sk-ant-...        # shared or client-specific
 
@@ -272,12 +275,25 @@ In **their** GHL workspace:
        "contact_id": "{{contact.id}}",
        "contact_name": "{{contact.name}}",
        "contact_email": "{{contact.email}}",
-       "contact_phone": "{{contact.phone}}"
+       "contact_phone": "{{contact.phone}}",
+
+       "utm_source":   "{{contact.attributionSource.utmSource}}",
+       "utm_medium":   "{{contact.attributionSource.utmMedium}}",
+       "utm_campaign": "{{contact.attributionSource.utmCampaign}}",
+       "utm_content":  "{{contact.attributionSource.utmContent}}",
+       "utm_term":     "{{contact.attributionSource.utmTerm}}"
      }
      ```
 
    (The exact merge tag names vary slightly across GHL versions — use the
-   workflow editor's tag picker rather than typing them by hand.)
+   workflow editor's tag picker rather than typing them by hand. The UTM
+   tags live on `contact.attributionSource.*` on most current GHL builds.)
+
+   **About attribution:** these UTM fields drive the entire marketing-loop
+   view of the dashboard. Make sure ad campaigns are passing UTMs on the
+   landing-page URL so GHL captures them on the contact. Without UTMs the
+   call still gets scored cleanly — `lead_source` just stays NULL and the
+   call shows up with "—" as its source.
 
 4. Save and publish the workflow.
 

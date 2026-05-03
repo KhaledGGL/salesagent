@@ -56,7 +56,6 @@ def score_transcript(
     lead_name: str | None,
     lead_source: str | None,
     lead_temperature: str | None,
-    call_type: str | None,
     duration_seconds: int | None,
 ) -> ScorecardOutput:
     """Send a transcript to Claude and return a validated ScorecardOutput.
@@ -78,7 +77,6 @@ def score_transcript(
         lead_name=lead_name or "Unknown",
         lead_source=lead_source or "unknown",
         lead_temperature=lead_temperature or "unknown",
-        call_type=call_type or "discovery",
         duration_minutes=duration_minutes,
         transcript=transcript,
     )

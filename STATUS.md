@@ -1,8 +1,7 @@
 # Project Status — Sales Call Analyzer
 
-**Last updated:** 2026-05-03
-**Current commit:** `454b341` (URL_PREFIX fix; UI work is on master ahead of this)
-**Phase:** v0.2 — full management UI shipped, ready for client onboarding.
+**Last updated:** 2026-05-04
+**Current phase:** v0.3 — single ingestion model, GHL-API-free, UTM-driven attribution.
 
 > **Deploying this for the first time?** Read [`INSTALL.md`](./INSTALL.md)
 > for a complete step-by-step guide. This file is for tracking *what's
@@ -153,6 +152,27 @@ See `infra/caddy/README.md` for the full host setup walkthrough.
 
 **Note:** `APP_ENV=development` is set because GHL doesn't natively
 HMAC-sign webhook payloads. The webhook URL is private/unguessable.
+
+### Phase 3 — Architectural simplification ✅ (shipped 2026-05-04)
+
+Single ingestion model: `/webhooks/ghl/transcript-ready` is now the
+only webhook endpoint. Lead-source attribution comes from UTM merge
+tags in the payload (`utm_source/medium/campaign/content/term`)
+instead of a follow-up GHL Contacts API call. Lead temperature is
+computed from our own `calls` history. New clients no longer need
+to issue a GHL Private Integration token.
+
+**Removed:** `/ghl/call-completed` endpoint, `process_call` task,
+`app/services/ghl_client.py`, `_enrich_from_contact` chain, `call_type`
+column + enum, `recording_url` column, `ghl_conversation_id` column.
+~250 lines deleted.
+
+**Added:** migration `008_simplify_to_inline_only.sql`, five UTM columns,
+`utm_source` → `lead_source` enum normalizer in the webhook handler,
+DB-derived lead-temperature compute (catches returning leads more
+accurately than GHL's `dateAdded`).
+
+246 tests pass.
 
 ### Phase 2 — Management UI ✅ (shipped 2026-05-03)
 

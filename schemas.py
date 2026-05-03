@@ -14,10 +14,6 @@ class LeadTemperature(str, Enum):
     cold = "cold"       # first touch
     warm = "warm"       # prior contact
 
-class CallType(str, Enum):
-    discovery = "discovery"
-    treatment_plan = "treatment_plan"
-
 class CallOutcome(str, Enum):
     sold = "sold"
     not_sold = "not_sold"
@@ -26,12 +22,13 @@ class CallOutcome(str, Enum):
     rescheduled = "rescheduled"
 
 class CallStatus(str, Enum):
-    received = "received"       # webhook received
-    fetching = "fetching"       # fetching transcript from GHL
-    queued = "queued"           # in Celery queue
+    received = "received"       # webhook received, transcript stored, awaiting scoring
     scoring = "scoring"         # Claude is scoring
     scored = "scored"           # done, scorecard written
     failed = "failed"           # something went wrong
+    # 'fetching' and 'queued' are legacy enum values from when transcripts
+    # were fetched via the GHL Conversations API. Kept in the enum for
+    # backwards compatibility with any in-flight rows; new rows never use them.
 
 class ObjectionType(str, Enum):
     price = "price"
@@ -73,31 +70,22 @@ class WeeklyReportType(str, Enum):
     marketing = "marketing"
 
 
-# ── GHL Webhook Payload ───────────────────────────────────────────────────────
-
-class GHLWebhookPayload(BaseModel):
-    """Normalized fields we extract from the GHL call-completed webhook."""
-    message_id: str
-    conversation_id: str
-    contact_id: str
-    location_id: str
-    user_id: str                        # rep's GHL user ID
-    duration_seconds: Optional[int] = None
-    called_at: Optional[str] = None     # ISO timestamp
-
+# ── Webhook payload ──────────────────────────────────────────────────────────
 
 class GHLTranscriptReadyPayload(BaseModel):
-    """Inline-transcript webhook from GHL's "Transcript Generated" trigger.
+    """Inline-transcript webhook payload (the only ingestion model).
 
-    Unlike GHLWebhookPayload (which carries only metadata and forces a
-    follow-up GHL API call to fetch the transcript), this payload delivers
-    the transcript text directly. This eliminates one API round-trip and
-    sidesteps the race where "call ended" fires before transcription is done.
+    The GHL workflow's "Transcript Generated" trigger POSTs a body shaped
+    like this to /webhooks/ghl/transcript-ready. Field names mirror GHL's
+    merge-tag namespace so the workflow editor maps 1:1.
 
-    Field names mirror GHL's `transcript_generated.*` merge tag namespace
-    so the webhook body in the GHL workflow editor maps 1:1.
+    All attribution comes from UTM merge tags in this payload — no
+    follow-up GHL Contacts API call is made. This means clients onboard
+    without issuing a GHL token and source attribution is per-campaign,
+    per-creative, per-keyword instead of just three buckets.
     """
-    call_sid: str                       # used as ghl_message_id (Twilio call SID, globally unique)
+    # ── Call identity ──────────────────────────────────────────────────
+    call_sid: str                       # used as ghl_message_id (globally unique)
     call_user_id: str                   # rep's GHL user ID
     call_user_name: Optional[str] = None  # rep's display name (e.g. "John Smith")
     call_transcript: str                # the actual dialogue text
@@ -105,10 +93,22 @@ class GHLTranscriptReadyPayload(BaseModel):
     call_status: Optional[str] = None   # we filter to "completed" only
     call_from: Optional[str] = None     # phone number, not stored
     call_to: Optional[str] = None       # phone number, not stored
+
+    # ── Contact ────────────────────────────────────────────────────────
     contact_id: str
     contact_name: Optional[str] = None
     contact_email: Optional[str] = None
     contact_phone: Optional[str] = None
+
+    # ── UTM attribution (replaces GHL Contacts API enrichment) ────────
+    # All optional — leads with no UTMs (e.g. direct/organic) just leave
+    # them null. utm_source feeds the lead_source enum (with normalization),
+    # the rest land on dedicated columns for campaign/creative-level analysis.
+    utm_source:   Optional[str] = None
+    utm_medium:   Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content:  Optional[str] = None
+    utm_term:     Optional[str] = None
 
 
 # ── Scorecard (Claude output) ─────────────────────────────────────────────────

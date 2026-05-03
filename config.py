@@ -21,9 +21,11 @@ class Settings(BaseSettings):
     # Redis / Celery
     redis_url: str = "redis://redis:6379/0"
 
-    # GHL
-    ghl_api_key: str
-    ghl_location_id: str
+    # GHL — optional. The current ingestion path is the inline-transcript
+    # webhook with UTM-based attribution; no GHL Contacts API is called.
+    # Kept here for backwards compat or future re-introduction.
+    ghl_api_key: str | None = None
+    ghl_location_id: str | None = None
 
     # Anthropic
     anthropic_api_key: str

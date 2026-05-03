@@ -1,14 +1,16 @@
 """Celery tasks — call processing pipeline.
 
 Pipeline:
-    webhook → process_call → score_call → (slack, later)
+    webhook → score_call → notify_scorecard
 
-process_call: fetch transcript + enrich lead metadata from GHL contact
-score_call:   send transcript to Claude, persist scorecard + moments + objections
+The webhook (/webhooks/ghl/transcript-ready) inserts the call row with
+the transcript already populated and full UTM-based enrichment. There's
+no transcript fetch to do, so process_call (the legacy task that handled
+the GHL Conversations API round-trip) was deleted — webhook now enqueues
+score_call directly.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import ValidationError
@@ -29,7 +31,6 @@ from app.services.claude_client import (
     generate_marketing_intel,
     score_transcript,
 )
-from app.services.ghl_client import fetch_transcript, get_contact, map_ghl_source
 from app.services.slack_client import post_message
 from app.workers.celery_app import celery_app
 from config import settings
@@ -40,149 +41,6 @@ logger = logging.getLogger(__name__)
 
 def _update_call(call_id: str, **fields) -> None:
     get_supabase().table("calls").update(fields).eq("id", call_id).execute()
-
-
-# ── Lead enrichment helpers ──────────────────────────────────────────────────
-
-def _derive_lead_temperature(contact: dict[str, Any]) -> str:
-    """Warm if contact has been in GHL for >30 days (prior relationship), else cold."""
-    date_added = contact.get("dateAdded")
-    if not date_added:
-        return "cold"
-    try:
-        added_dt = datetime.fromisoformat(date_added.replace("Z", "+00:00"))
-    except ValueError:
-        return "cold"
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-    return "warm" if added_dt < cutoff else "cold"
-
-
-def _custom_field(contact: dict[str, Any], key: str, default: str) -> str:
-    """Safe access to a GHL contact custom field (handles list-of-dicts and dict shapes)."""
-    cf = contact.get("customFields") or contact.get("custom_fields") or {}
-    if isinstance(cf, dict):
-        return str(cf.get(key) or default).lower()
-    if isinstance(cf, list):
-        for item in cf:
-            if item.get("key") == key or item.get("id") == key:
-                return str(item.get("value") or default).lower()
-    return default
-
-
-def _enrich_from_contact(contact: dict[str, Any]) -> dict[str, Any]:
-    """Map GHL contact → columns on the calls table."""
-    first = contact.get("firstName") or ""
-    last = contact.get("lastName") or ""
-    lead_name = (f"{first} {last}").strip() or contact.get("name") or None
-
-    return {
-        "lead_name": lead_name,
-        "lead_source": map_ghl_source(contact.get("source", "")),
-        "lead_temperature": _derive_lead_temperature(contact),
-        "call_type": _custom_field(contact, "call_type", "discovery"),
-        # Outcome is intentionally NOT read from a CRM custom field.
-        # It's now classified by Claude from the transcript itself
-        # (see score_call → ScorecardOutput.outcome). Reps populate CRM
-        # outcome fields after the call ends — often after scoring runs —
-        # so reading it here was reliably undercounting closes.
-    }
-
-
-# ── Task: process_call ───────────────────────────────────────────────────────
-
-@celery_app.task(
-    bind=True,
-    name="process_call",
-    max_retries=3,
-    default_retry_delay=30,
-    autoretry_for=(Exception,),
-    retry_backoff=True,
-)
-def process_call(self, call_id: str, message_id: str) -> dict:
-    """Fetch transcript + enrich lead metadata from GHL, then enqueue scoring.
-
-    Status transitions: received → fetching → queued
-    """
-    logger.info("process_call started: call_id=%s message_id=%s", call_id, message_id)
-
-    try:
-        _update_call(call_id, status="fetching")
-
-        # ── Detect inline-transcript fast path ───────────────────────────
-        # The /webhooks/ghl/transcript-ready endpoint inserts the call row
-        # with the transcript already populated. In that case we skip the
-        # GHL message fetch entirely and only do contact enrichment.
-        existing_row = (
-            get_supabase()
-            .table("calls")
-            .select("transcript, ghl_contact_id")
-            .eq("id", call_id)
-            .single()
-            .execute()
-        )
-        existing_transcript = (existing_row.data or {}).get("transcript")
-        contact_id = (existing_row.data or {}).get("ghl_contact_id")
-
-        if existing_transcript:
-            logger.info(
-                "Inline transcript detected for call_id=%s (%d chars) — skipping GHL fetch",
-                call_id, len(existing_transcript),
-            )
-            transcript = existing_transcript
-            result: dict[str, Any] = {
-                "transcript": transcript,
-                "recording_url": None,
-                "duration_seconds": None,
-                "called_at": None,
-            }
-        else:
-            # ── 2-step transcript fetch from GHL ─────────────────────────
-            result = fetch_transcript(message_id)
-            transcript = result["transcript"]
-
-            if not transcript:
-                _update_call(
-                    call_id,
-                    status="failed",
-                    error_message="No transcript returned from GHL",
-                    recording_url=result.get("recording_url"),
-                )
-                logger.warning("No transcript for call_id=%s", call_id)
-                return {"call_id": call_id, "status": "failed", "reason": "no_transcript"}
-
-        enrichment: dict[str, Any] = {}
-        try:
-            contact = get_contact(contact_id)
-            enrichment = _enrich_from_contact(contact)
-        except Exception as exc:
-            logger.warning("Contact enrichment failed for %s: %s", contact_id, exc)
-
-        # ── Persist everything ───────────────────────────────────────────
-        update_fields: dict[str, Any] = {
-            "transcript": transcript,
-            "status": "queued",
-            **enrichment,
-        }
-        if result["recording_url"]:
-            update_fields["recording_url"] = result["recording_url"]
-        if result["duration_seconds"]:
-            update_fields["duration_seconds"] = result["duration_seconds"]
-        if result["called_at"]:
-            update_fields["called_at"] = result["called_at"]
-
-        _update_call(call_id, **update_fields)
-        logger.info("Transcript + enrichment saved for call_id=%s", call_id)
-
-        # ── Enqueue scoring ──────────────────────────────────────────────
-        score_call.delay(call_id)
-        logger.info("Enqueued score_call for call_id=%s", call_id)
-
-        return {"call_id": call_id, "status": "queued"}
-
-    except Exception as exc:
-        logger.error("process_call failed: call_id=%s error=%s", call_id, exc, exc_info=True)
-        _update_call(call_id, status="failed", error_message=str(exc)[:500])
-        raise
 
 
 # ── Task: score_call ─────────────────────────────────────────────────────────
@@ -228,7 +86,6 @@ def score_call(self, call_id: str) -> dict:
                 lead_name=call.get("lead_name"),
                 lead_source=call.get("lead_source"),
                 lead_temperature=call.get("lead_temperature"),
-                call_type=call.get("call_type"),
                 duration_seconds=call.get("duration_seconds"),
             )
         except TranscriptTooShortError as exc:
@@ -394,7 +251,7 @@ def notify_scorecard(self, call_id: str) -> dict:
         ai_summary=score["ai_summary"],
         win_loss_timestamp=score.get("win_loss_timestamp"),
         win_loss_description=score.get("win_loss_description"),
-        recording_url=call.get("recording_url"),
+        recording_url=None,
     )
     fallback = build_fallback_text(rep_name, score["overall_score"], call.get("outcome"))
 

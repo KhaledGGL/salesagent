@@ -27,7 +27,6 @@ def _scored_call_row():
         "transcript": "Rep: Hi Sarah... Prospect: Hi, yes I want to buy.",
         "duration_seconds": 387,
         "called_at": "2026-04-30T15:42:00+00:00",
-        "recording_url": "https://example.com/rec.mp3",
         "status": "scored",
         "error_message": None,
         "reps": {"name": "Sarah Rivera"},
@@ -150,13 +149,6 @@ class TestCallDetailScored:
         body = client.get("/ui/calls/call-uuid-1").text
         assert "Transcript" in body
         assert "I want to buy" in body
-
-    def test_renders_recording_link(self, client, mocker):
-        _wire_supabase(mocker, call_row=_scored_call_row(),
-                       coaching=[], objections=[])
-        body = client.get("/ui/calls/call-uuid-1").text
-        assert "https://example.com/rec.mp3" in body
-        assert "Listen" in body
 
     def test_therapist_banner_only_when_flagged(self, client, mocker):
         row = _scored_call_row()

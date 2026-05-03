@@ -1,15 +1,39 @@
-"""GHL webhook receiver — signature verification → DB insert → Celery enqueue."""
+"""GHL webhook receiver — inline-transcript ingestion.
+
+The /webhooks/ghl/transcript-ready endpoint is the sole ingestion model:
+GHL's "Transcript Generated" workflow trigger POSTs the transcript
+inline plus UTM merge tags for attribution. We persist the call with
+full lead enrichment (UTM source/medium/campaign/content/term, plus
+cold/warm computed from our own call history for this contact) and
+dispatch scoring directly — no follow-up GHL Contacts API call.
+
+This is a deliberate simplification of the original two-endpoint flow
+(/call-completed → fetch_transcript via GHL API) because:
+
+  1. Inline payload eliminates a round-trip and a race condition
+     between "call ended" and "transcription ready" events.
+  2. UTM-based attribution is more granular than the old 3-bucket
+     contact source field — campaign / creative / keyword level.
+  3. New clients no longer need a GHL Private Integration token,
+     simplifying onboarding.
+  4. Lead temperature computed from our own DB is more accurate than
+     reading GHL's contact dateAdded (catches returning leads who
+     re-enter after months of inactivity).
+"""
 
 import hashlib
 import hmac
+import json as _json
 import logging
+import re
 from datetime import datetime, timezone
+from urllib.parse import parse_qs
 
 from fastapi import APIRouter, Header, HTTPException, Request
 
 from app.db import get_supabase
 from config import settings
-from schemas import GHLTranscriptReadyPayload, GHLWebhookPayload
+from schemas import GHLTranscriptReadyPayload
 
 MIN_TRANSCRIPT_CHARS = 50  # below this, scoring is meaningless — drop early
 
@@ -29,119 +53,55 @@ def _verify_signature(payload_bytes: bytes, signature: str) -> bool:
     return hmac.compare_digest(expected, signature)
 
 
-# ── Webhook endpoint ─────────────────────────────────────────────────────────
+# ── UTM source → lead_source enum normalization ──────────────────────────────
 
-@router.post("/ghl/call-completed", status_code=200)
-async def ghl_call_completed(
-    request: Request,
-    x_ghl_signature: str = Header(alias="X-GHL-Signature", default=""),
-):
-    """Receive a call-completed webhook from GHL.
+def _normalize_utm_source(utm_source: str | None) -> str | None:
+    """Map a free-form utm_source value to the LeadSource enum.
 
-    Flow:
-    1. Verify HMAC signature
-    2. Parse payload into GHLWebhookPayload
-    3. Upsert rep if unknown (auto-provision)
-    4. Insert a `calls` row with status='received'
-    5. Enqueue the Celery `process_call` task
+    Real-world utm_source values are messy ('facebook', 'fb', 'meta-cpc',
+    'google-ads', 'organic', 'direct', etc.). We normalize the common ones
+    so the existing analytical views (close rate by source, cold/warm
+    comparison, etc.) keep working without expanding the enum surface.
+
+    The full utm_* set is preserved on dedicated columns for
+    campaign/creative-level analysis — this is just for the high-level bucket.
     """
-    body = await request.body()
+    if not utm_source:
+        return None
+    s = utm_source.strip().lower()
+    if not s:
+        return None
+    if "facebook" in s or "instagram" in s or "meta" in s or s in ("fb", "ig"):
+        return "meta"
+    if "google" in s or "adwords" in s or "youtube" in s or s == "g-ads":
+        return "google"
+    return "organic"
 
-    # 1. Signature check
-    if settings.is_production and not _verify_signature(body, x_ghl_signature):
-        logger.warning("Invalid webhook signature")
-        raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # 2. Parse
-    raw = await request.json()
-    try:
-        payload = GHLWebhookPayload(
-            message_id=raw.get("messageId", raw.get("message_id", "")),
-            conversation_id=raw.get("conversationId", raw.get("conversation_id", "")),
-            contact_id=raw.get("contactId", raw.get("contact_id", "")),
-            location_id=raw.get("locationId", raw.get("location_id", "")),
-            user_id=raw.get("userId", raw.get("user_id", "")),
-            duration_seconds=raw.get("duration"),
-            called_at=raw.get("dateAdded") or raw.get("createdAt"),
-        )
-    except Exception as exc:
-        logger.error("Payload parse error: %s", exc)
-        raise HTTPException(status_code=422, detail=str(exc))
+# ── Lead temperature from our own call history ───────────────────────────────
 
-    db = get_supabase()
+def _compute_lead_temperature(db, contact_id: str | None) -> str:
+    """Cold if this is the first time we've seen this contact, warm otherwise.
 
-    # 3. Upsert rep (auto-provision with placeholder name)
-    rep_row = (
-        db.table("reps")
-        .select("id")
-        .eq("ghl_user_id", payload.user_id)
-        .maybe_single()
-        .execute()
-    )
-    # supabase-py 2.28+ returns None directly from maybe_single().execute()
-    # when no row matches, instead of an APIResponse with data=None.
-    if rep_row is not None and rep_row.data:
-        rep_id = rep_row.data["id"]
-    else:
-        new_rep = (
-            db.table("reps")
-            .insert({"ghl_user_id": payload.user_id, "name": f"Rep {payload.user_id[:8]}"})
-            .execute()
-        )
-        rep_id = new_rep.data[0]["id"]
-        logger.info("Auto-provisioned rep %s for ghl_user_id=%s", rep_id, payload.user_id)
-
-    # 4. Deduplicate on ghl_message_id, then insert
-    existing = (
+    Replaces the legacy logic that read the GHL contact's dateAdded.
+    Self-contained, more accurate (catches returning leads), and avoids
+    the cross-system call. NULL contact_id falls back to 'cold'.
+    """
+    if not contact_id:
+        return "cold"
+    prior = (
         db.table("calls")
         .select("id")
-        .eq("ghl_message_id", payload.message_id)
-        .maybe_single()
+        .eq("ghl_contact_id", contact_id)
+        .limit(1)
         .execute()
+        .data
+        or []
     )
-    if existing is not None and existing.data:
-        logger.info("Duplicate webhook for message_id=%s, skipping", payload.message_id)
-        return {"status": "duplicate", "call_id": existing.data["id"]}
-
-    call_row = (
-        db.table("calls")
-        .insert({
-            "rep_id": rep_id,
-            "ghl_contact_id": payload.contact_id,
-            "ghl_message_id": payload.message_id,
-            "ghl_conversation_id": payload.conversation_id,
-            "duration_seconds": payload.duration_seconds,
-            "called_at": payload.called_at,
-            "status": "received",
-        })
-        .execute()
-    )
-    call_id = call_row.data[0]["id"]
-    logger.info("Inserted call %s (message_id=%s)", call_id, payload.message_id)
-
-    # 5. Enqueue Celery task
-    from app.workers.tasks import process_call
-
-    process_call.delay(call_id, payload.message_id)
-    logger.info("Enqueued process_call for call_id=%s", call_id)
-
-    return {"status": "accepted", "call_id": call_id}
+    return "warm" if prior else "cold"
 
 
-# ── Inline-transcript webhook ────────────────────────────────────────────────
-#
-# GHL's "Transcript Generated" trigger fires AFTER transcription completes
-# and lets us include the transcript text directly in the webhook body. This
-# is preferable to /ghl/call-completed because:
-#
-#   1. No follow-up GHL API call needed → one less point of failure
-#   2. No race between "call ended" and "transcription ready" events
-#   3. Works on GHL workspaces where transcripts aren't exposed via the
-#      Conversations API but ARE available in workflow merge tags
-#
-# This endpoint inserts the call with the transcript already populated, then
-# dispatches process_call (which detects the inline transcript and skips the
-# GHL fetch step, going straight to contact enrichment and scoring).
+# ── Webhook endpoint ─────────────────────────────────────────────────────────
 
 @router.post("/ghl/transcript-ready", status_code=200)
 async def ghl_transcript_ready(
@@ -151,19 +111,18 @@ async def ghl_transcript_ready(
     """Receive a transcript-generated webhook from GHL with inline transcript.
 
     Flow:
-    1. Verify HMAC signature (production only)
-    2. Parse + validate payload
-    3. Filter out non-completed calls and too-short transcripts
-    4. Upsert rep, dedup on call_sid, insert call row WITH transcript
-    5. Enqueue process_call (which will skip the GHL fetch step)
+      1. Verify HMAC signature (production only)
+      2. Parse + validate payload (tolerant of GHL's three body shapes)
+      3. Filter out non-completed calls and too-short transcripts
+      4. Upsert rep, dedup on call_sid
+      5. Compute lead_temperature from our DB, normalize utm_source
+      6. Insert call row with transcript + full UTM enrichment
+      7. Enqueue score_call directly
     """
-    import json as _json
-    from urllib.parse import parse_qs
-
     body = await request.body()
     content_type = request.headers.get("content-type", "")
 
-    # 1. Signature check (dev mode bypasses, same as call-completed)
+    # 1. Signature check (dev mode bypasses)
     if settings.is_production and not _verify_signature(body, x_ghl_signature):
         logger.warning("Invalid webhook signature on transcript-ready")
         raise HTTPException(status_code=401, detail="Invalid signature")
@@ -195,15 +154,10 @@ async def ghl_transcript_ready(
     # regex, escape its contents, then re-parse.
     if raw is None and body_text.lstrip().startswith("{"):
         try:
-            import re
-            # Escape unescaped control chars inside the call_transcript value.
-            # We greedy-match from `"call_transcript":"` to the next `"` that
-            # is followed by either `,` or `}` (the end of the field).
             def _escape_transcript(match: "re.Match") -> str:
                 inner = match.group(1)
                 inner = inner.replace("\\", "\\\\")
                 inner = inner.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
-                # Escape any double-quote that isn't already escaped
                 inner = re.sub(r'(?<!\\)"', r'\\"', inner)
                 return f'"call_transcript": "{inner}"'
 
@@ -221,8 +175,7 @@ async def ghl_transcript_ready(
         except Exception as exc:
             parse_attempts.append(f"json_repair:fail({exc})")
 
-    # 2c. Form-urlencoded fallback. Reject single-key results where the key
-    # itself looks like JSON (i.e. the form parser ate a JSON body whole).
+    # 2c. Form-urlencoded fallback
     if raw is None:
         try:
             parsed = parse_qs(body_text, keep_blank_values=True)
@@ -247,7 +200,7 @@ async def ghl_transcript_ready(
             detail=f"Unparseable body. content-type={content_type!r}. attempts={parse_attempts}",
         )
 
-    # 2d. Some GHL setups wrap everything inside a single "payload" field
+    # 2e. Some GHL setups wrap everything inside a single "payload" field
     # whose value is a JSON string. Detect and unwrap.
     if len(raw) == 1 and "payload" in raw and isinstance(raw["payload"], str):
         try:
@@ -257,7 +210,7 @@ async def ghl_transcript_ready(
         except Exception:
             pass  # leave raw as-is, validation will catch it
 
-    # 2e. Coerce GHL's empty-string merge-tag defaults to None
+    # 2f. Coerce GHL's empty-string merge-tag defaults to None
     raw = {k: (None if v == "" else v) for k, v in raw.items()}
 
     logger.info("transcript-ready parsed body: keys=%s", sorted(raw.keys()))
@@ -291,8 +244,8 @@ async def ghl_transcript_ready(
 
     db = get_supabase()
 
-    # 4a. Upsert rep — auto-provision new reps; backfill placeholder names
-    # on existing rows when a real call_user_name now arrives.
+    # 4a. Upsert rep — backfill placeholder names on existing rows when a
+    # real call_user_name now arrives.
     placeholder_name = f"Rep {payload.call_user_id[:8]}"
     real_name = (payload.call_user_name or "").strip() or None
 
@@ -303,11 +256,8 @@ async def ghl_transcript_ready(
         .maybe_single()
         .execute()
     )
-    # supabase-py 2.28+ returns None directly when no row matches.
     if rep_row is not None and rep_row.data:
         rep_id = rep_row.data["id"]
-        # Backfill: if the stored name is still our auto-provisioned placeholder
-        # and we now have a real name, upgrade it. Don't touch human-edited names.
         if real_name and rep_row.data.get("name") == placeholder_name:
             db.table("reps").update({"name": real_name}).eq("id", rep_id).execute()
             logger.info("Backfilled rep %s name → %r", rep_id, real_name)
@@ -338,32 +288,45 @@ async def ghl_transcript_ready(
         logger.info("Duplicate transcript-ready for call_sid=%s, skipping", payload.call_sid)
         return {"status": "duplicate", "call_id": existing.data["id"]}
 
-    # 4c. Insert call row WITH transcript already populated
+    # 5. Enrichment derived from this payload + our DB
+    lead_source = _normalize_utm_source(payload.utm_source)
+    lead_temperature = _compute_lead_temperature(db, payload.contact_id)
+
+    # 6. Insert call row with full enrichment
     call_row = (
         db.table("calls")
         .insert({
-            "rep_id": rep_id,
-            "ghl_contact_id": payload.contact_id,
-            "ghl_message_id": payload.call_sid,
-            "lead_name": payload.contact_name,
-            "transcript": transcript,
+            "rep_id":           rep_id,
+            "ghl_contact_id":   payload.contact_id,
+            "ghl_message_id":   payload.call_sid,
+            "lead_name":        payload.contact_name,
+            "lead_source":      lead_source,
+            "lead_temperature": lead_temperature,
+            "transcript":       transcript,
             "duration_seconds": payload.call_duration,
-            "called_at": datetime.now(timezone.utc).isoformat(),
-            "status": "received",
+            "called_at":        datetime.now(timezone.utc).isoformat(),
+            "status":           "received",
+            "utm_source":       payload.utm_source,
+            "utm_medium":       payload.utm_medium,
+            "utm_campaign":     payload.utm_campaign,
+            "utm_content":      payload.utm_content,
+            "utm_term":         payload.utm_term,
         })
         .execute()
     )
     call_id = call_row.data[0]["id"]
     logger.info(
-        "Inserted call %s with inline transcript (%d chars, sid=%s)",
+        "Inserted call %s (chars=%d sid=%s utm_source=%r → %s, temp=%s)",
         call_id, len(transcript), payload.call_sid,
+        payload.utm_source, lead_source, lead_temperature,
     )
 
-    # 5. Enqueue process_call — it will detect the inline transcript and
-    # skip the GHL fetch, doing only contact enrichment + score dispatch.
-    from app.workers.tasks import process_call
+    # 7. Enqueue scoring directly — process_call is no longer needed since
+    # there's no transcript fetch to do. score_call already handles its own
+    # status transition (received → scoring → scored/failed).
+    from app.workers.tasks import score_call
 
-    process_call.delay(call_id, payload.call_sid)
-    logger.info("Enqueued process_call for inline-transcript call_id=%s", call_id)
+    score_call.delay(call_id)
+    logger.info("Enqueued score_call for call_id=%s", call_id)
 
     return {"status": "accepted", "call_id": call_id}

@@ -158,7 +158,6 @@ Analyze the following sales call transcript and return the JSON scorecard.
 - Lead name: {lead_name}
 - Lead source: {lead_source}
 - Lead temperature: {lead_temperature}
-- Call type: {call_type}
 - Call duration: {duration_minutes} minutes
 
 ## Transcript

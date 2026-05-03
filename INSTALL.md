@@ -29,7 +29,6 @@ methodology), and posts to Slack:
                                             ▼
                                    ┌─────────────────┐
                                    │ Celery worker    │
-                                   │  process_call    │ ──▶ enrich from CRM contact
                                    │  score_call      │ ──▶ Claude API
                                    │  notify_scorecard│ ──▶ Slack
                                    │  weekly_report   │ ──▶ Slack (Monday :00)
@@ -194,13 +193,15 @@ curl https://api.<domain>/
 
 #### GoHighLevel
 
-1. **Create a Private Integration** (sub-account → Settings → Private
-   Integrations → New). Required scopes:
-   - `conversations.readonly`
-   - `conversations/message.readonly`
-   - `contacts.readonly`
-2. Save the API key (starts with `pit-`) → `GHL_API_KEY`
-3. Save the **Location ID** (visible in sub-account URL) → `GHL_LOCATION_ID`
+The current ingestion model is the inline-transcript webhook with UTM
+merge tags — **no GHL Private Integration / API key is required.** All
+attribution comes from the webhook payload itself (utm_source, _medium,
+_campaign, _content, _term passed via merge tags from the contact's
+attribution source). Lead temperature is computed from our own DB.
+
+You only need to configure the GHL workflow webhook (Step "GHL workflow"
+in the post-deploy section). See ONBOARDING.md for the body shape and
+the merge tags to plug in.
 
 #### Any other CRM
 
@@ -246,9 +247,11 @@ SUPABASE_SERVICE_KEY=<service_role secret>
 # ── Redis (leave as-is) ─────────────────────────
 REDIS_URL=redis://redis:6379/0
 
-# ── GHL ──────────────────────────────────────────
-GHL_API_KEY=<pit-...>
-GHL_LOCATION_ID=<location-id>
+# ── GHL — OPTIONAL (no longer required) ─────────
+# Inline-transcript webhook + UTM merge tags carries everything.
+# Leave blank unless you re-introduce a GHL Contacts API integration.
+# GHL_API_KEY=
+# GHL_LOCATION_ID=
 
 # ── Anthropic ────────────────────────────────────
 ANTHROPIC_API_KEY=sk-ant-...
@@ -517,7 +520,8 @@ If your CRM only provides audio, not text, add a transcription step.
 
 1. Add `deepgram-sdk` to `requirements.txt`
 2. Create `app/services/transcription.py` with a `transcribe_url()` function
-3. Modify `process_call` to call it when transcript is empty but recording URL exists
+3. Add a step that runs transcription before the `score_call` task (e.g.
+   a new Celery task fired from the webhook when no transcript is present)
 4. Add `DEEPGRAM_API_KEY` to config and `.env`
 
 Total work: ~30-60 minutes.

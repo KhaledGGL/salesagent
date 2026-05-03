@@ -91,27 +91,43 @@ is up.
 - Flower (Celery monitoring): http://localhost:5555
 - Redis: localhost:6379 (only reachable from the host itself)
 
-## Webhook contract (current)
+## Webhook contract (sole ingestion path)
 
-`POST /webhooks/ghl/transcript-ready` accepts inline-transcript payloads:
+`POST /webhooks/ghl/transcript-ready` is the only ingestion endpoint.
+The legacy `/ghl/call-completed` + GHL Conversations API fetch path was
+removed in commit (this) — UTM tags in the inline payload now drive
+attribution and lead temperature is computed from our own `calls`
+history. No GHL Contacts API call is made.
 
 ```json
 {
   "call_sid": "<unique per call, used for dedup>",
   "call_user_id": "<rep's CRM user ID>",
+  "call_user_name": "<rep's display name>",
   "call_transcript": "<the full transcript text, ≥50 chars>",
   "call_status": "completed",
   "contact_id": "<CRM contact ID>",
   "call_duration": 387,
   "contact_name": "optional",
   "contact_email": "optional",
-  "contact_phone": "optional"
+  "contact_phone": "optional",
+
+  "utm_source":   "facebook | google | tiktok | direct | ...",
+  "utm_medium":   "cpc | cpm | social | organic | ...",
+  "utm_campaign": "campaign name from the ad URL",
+  "utm_content":  "creative variant",
+  "utm_term":     "keyword (Google search ads)"
 }
 ```
 
 The body parser is tolerant: it accepts strict JSON, JSON with
 unescaped newlines/quotes inside the transcript value (auto-repaired),
 form-urlencoded, and form-urlencoded with a wrapped `payload` field.
+
+`utm_source` is normalized into the `lead_source` enum
+(`meta` / `google` / `organic`) for the dashboard's high-level bucket.
+The full UTM set is preserved on dedicated columns for
+campaign / creative / keyword analysis.
 
 ## Environment
 - Copy `.env.example` to `.env` and fill in real values
