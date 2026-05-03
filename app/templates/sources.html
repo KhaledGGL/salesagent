@@ -1,13 +1,90 @@
 {% extends "base.html" %}
 {% block title %}Sources{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div>
-        <h1 class="text-2xl font-semibold text-white">Lead Sources</h1>
-        <p class="mt-1 text-sm text-zinc-400">Performance comparison across Meta, Google, and Organic.</p>
-    </div>
-    <div class="rounded-lg border border-zinc-800/60 bg-zinc-900/60 p-12 text-center text-zinc-500">
-        Source breakdown coming next — close rate, score quality, dominant objections per source.
-    </div>
+
+<div class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight text-white">Lead Sources</h1>
+    <p class="mt-1 text-sm text-zinc-400">Marketing-loop view — close rate + score quality + objection patterns per source.</p>
 </div>
+
+{# ── Source performance — last completed week ───────────────────────── #}
+<section class="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+    <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Last week · close rate by source</h2>
+    {% if source_perf %}
+    <div class="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {% for s in source_perf %}
+            {% set close = s.close_rate_pct or 0 %}
+            <div class="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="text-sm font-medium text-zinc-100">{{ s.lead_source|capitalize }}</span>
+                    <span class="text-xs text-zinc-500 tabular-nums">{{ s.total_calls }} call{{ '' if s.total_calls == 1 else 's' }}</span>
+                </div>
+                <div class="text-2xl font-semibold tabular-nums text-zinc-100">{{ close }}<span class="text-sm text-zinc-500">%</span></div>
+                <div class="mt-1 text-xs text-zinc-400">
+                    {{ s.sold_calls or 0 }} sold · avg score {{ s.avg_overall_score or '—' }}
+                </div>
+
+                {# Top objections for this source #}
+                {% set objs = obj_by_source.get(s.lead_source) %}
+                {% if objs %}
+                <div class="mt-3 pt-3 border-t border-zinc-800">
+                    <div class="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Top objections</div>
+                    <ul class="space-y-0.5 text-xs">
+                        {% for o in objs[:3] %}
+                        <li class="flex justify-between text-zinc-300">
+                            <span>{{ o.objection_type|capitalize }}</span>
+                            <span class="text-zinc-500 tabular-nums">{{ o.frequency }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="mt-3 text-sm text-zinc-500">No source data for last week yet.</p>
+    {% endif %}
+</section>
+
+{# ── Cold vs warm comparison — 90 days ───────────────────────────────── #}
+<section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+    <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Cold vs warm · last 90 days</h2>
+    <p class="mt-1 text-xs text-zinc-500">Higher cold close rate generally signals a strong rep (cold leads are harder). Big gap = lead-quality story.</p>
+
+    {% if cold_warm %}
+    <div class="mt-4 overflow-hidden rounded-lg border border-zinc-800">
+        <table class="min-w-full divide-y divide-zinc-800 text-sm">
+            <thead class="bg-zinc-950/60">
+                <tr class="text-left text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                    <th class="px-3 py-2">Rep</th>
+                    <th class="px-3 py-2">Temp</th>
+                    <th class="px-3 py-2 text-right">Calls</th>
+                    <th class="px-3 py-2 text-right">Close rate</th>
+                    <th class="px-3 py-2 text-right">Avg score</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-zinc-800/60">
+                {% for cw in cold_warm %}
+                <tr>
+                    <td class="px-3 py-2 text-zinc-100">{{ cw.rep_name }}</td>
+                    <td class="px-3 py-2">
+                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-inset
+                                     {% if cw.lead_temperature == 'cold' %}bg-sky-500/10 text-sky-400 ring-sky-500/20{% else %}bg-amber-500/10 text-amber-400 ring-amber-500/20{% endif %}">
+                            {{ cw.lead_temperature|capitalize }}
+                        </span>
+                    </td>
+                    <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ cw.total_calls }}</td>
+                    <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{% if cw.close_rate_pct is not none %}{{ cw.close_rate_pct }}%{% else %}—{% endif %}</td>
+                    <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ cw.avg_score or '—' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="mt-3 text-sm text-zinc-500">No cold-vs-warm data yet.</p>
+    {% endif %}
+</section>
+
 {% endblock %}

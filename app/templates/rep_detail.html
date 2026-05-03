@@ -1,14 +1,194 @@
 {% extends "base.html" %}
-{% block title %}Rep Detail{% endblock %}
+{% block title %}{{ rep.name }}{% endblock %}
 {% block content %}
+
+<div class="mb-6">
+    <a href="{{ URL_PREFIX }}/ui/reps" class="text-sm text-zinc-500 hover:text-zinc-200 transition">← Back to reps</a>
+</div>
+
 <div class="space-y-6">
-    <div>
-        <a href="{{ URL_PREFIX }}/ui/reps" class="text-sm text-zinc-400 hover:text-white">← Back to reps</a>
-        <h1 class="mt-2 text-2xl font-semibold text-white">Rep Detail</h1>
-        <p class="mt-1 text-sm text-zinc-400">ID: <code class="rounded bg-zinc-800/60 px-1.5 py-0.5 text-xs">{{ rep_id }}</code></p>
-    </div>
-    <div class="rounded-lg border border-zinc-800/60 bg-zinc-900/60 p-12 text-center text-zinc-500">
-        Per-rep score trends + coaching effectiveness check coming next.
-    </div>
+
+    {# ── Header ─────────────────────────────────────────────────────── #}
+    <section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <h1 class="text-2xl font-semibold tracking-tight text-white">{{ rep.name }}</h1>
+        <p class="mt-1.5 text-sm text-zinc-400">
+            {% if rep.email %}{{ rep.email }} · {% endif %}
+            {% if perf.total_calls %}{{ perf.total_calls }} calls in last 30 days{% else %}No calls in last 30 days{% endif %}
+            {% if perf.close_rate_pct is not none %}· {{ perf.close_rate_pct }}% close rate{% endif %}
+        </p>
+    </section>
+
+    {# ── 30-day stat cards ───────────────────────────────────────────── #}
+    <section class="grid grid-cols-2 sm:grid-cols-6 gap-3">
+        {% for label, val in [
+            ("Calls",    perf.total_calls or 0),
+            ("Sold",     perf.sold_calls or 0),
+            ("Rapport",  perf.avg_rapport),
+            ("Diagnosis",perf.avg_diagnosis),
+            ("Objection",perf.avg_objection),
+            ("Close",    perf.avg_close),
+        ] %}
+        <div class="rounded-lg border border-zinc-800 bg-zinc-900/60 p-4">
+            <div class="text-[10px] uppercase tracking-wider text-zinc-500">{{ label }}</div>
+            <div class="mt-1 text-2xl font-semibold tabular-nums text-zinc-100">
+                {% if val is none %}<span class="text-zinc-600">—</span>{% else %}{{ val }}{% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </section>
+
+    {# ── Score trend chart ───────────────────────────────────────────── #}
+    {% if timeline %}
+    <section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Overall score · last 90 days</h2>
+        <div class="mt-3 h-64">
+            <canvas id="repScoreChart"></canvas>
+        </div>
+    </section>
+    <script>
+        // Defer until Chart.js (loaded via CDN) is ready.
+        window.addEventListener('load', function () {
+            if (!window.Chart) return;
+            var ctx = document.getElementById('repScoreChart');
+            if (!ctx) return;
+            var data = {{ timeline|tojson }};
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: data.map(function (d) { return (d.called_at || '').slice(0, 10); }),
+                    datasets: [{
+                        label: 'Overall score',
+                        data: data.map(function (d) { return d.overall; }),
+                        borderColor: 'rgb(244, 244, 245)',
+                        backgroundColor: 'rgba(244, 244, 245, 0.1)',
+                        tension: 0.3,
+                        fill: true,
+                        pointBackgroundColor: 'rgb(244, 244, 245)',
+                        pointRadius: 3,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { min: 0, max: 10, ticks: { color: 'rgb(161, 161, 170)' }, grid: { color: 'rgba(63, 63, 70, 0.5)' } },
+                        x: { ticks: { color: 'rgb(161, 161, 170)', maxRotation: 0, autoSkip: true }, grid: { display: false } }
+                    },
+                    plugins: { legend: { display: false } }
+                }
+            });
+        });
+    </script>
+    {% endif %}
+
+    {# ── Coaching effectiveness check ────────────────────────────────── #}
+    {% if effectiveness %}
+    <section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Coaching effectiveness</h2>
+        <p class="mt-1 text-xs text-zinc-500">
+            Average category score before vs. after the most recent coaching moment in that category.
+        </p>
+        <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {% for e in effectiveness %}
+            <div class="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-medium text-zinc-100">{{ h.category_label(e.category) }}</span>
+                    {% if e.delta is not none %}
+                        {% if e.delta > 0 %}
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-emerald-500/10 text-emerald-400 ring-emerald-500/20">↑ {{ '%.2f'|format(e.delta) }}</span>
+                        {% elif e.delta < 0 %}
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-rose-500/10 text-rose-400 ring-rose-500/20">↓ {{ '%.2f'|format(-e.delta) }}</span>
+                        {% else %}
+                            <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset bg-zinc-800/60 text-zinc-400 ring-zinc-700/60">flat</span>
+                        {% endif %}
+                    {% endif %}
+                </div>
+                <div class="mt-2 flex items-baseline gap-3 text-sm tabular-nums">
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-zinc-500">Before</div>
+                        <div class="text-zinc-200">{% if e.before_avg is not none %}{{ e.before_avg }}{% else %}—{% endif %}<span class="text-zinc-600 text-xs ml-1">({{ e.before_count }})</span></div>
+                    </div>
+                    <div class="text-zinc-700">→</div>
+                    <div>
+                        <div class="text-[10px] uppercase tracking-wider text-zinc-500">After</div>
+                        <div class="text-zinc-200">{% if e.after_avg is not none %}{{ e.after_avg }}{% else %}—{% endif %}<span class="text-zinc-600 text-xs ml-1">({{ e.after_count }})</span></div>
+                    </div>
+                </div>
+                <div class="mt-2 text-[11px] text-zinc-500">
+                    Coached on {{ e.anchor_date }} · {{ e.moments_count }} moment{{ '' if e.moments_count == 1 else 's' }}
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {# ── Coaching moments grouped by category ───────────────────────── #}
+    {% if coaching_by_category %}
+    <section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Coaching moments by category</h2>
+        <div class="mt-4 space-y-4">
+            {% for cat, moments in coaching_by_category.items() %}
+            <div>
+                <div class="mb-2 flex items-baseline gap-2">
+                    <span class="text-sm font-medium text-zinc-100">{{ h.category_label(cat) }}</span>
+                    <span class="text-xs text-zinc-500">{{ moments|length }} moment{{ '' if moments|length == 1 else 's' }}</span>
+                </div>
+                <ul class="space-y-2">
+                    {% for m in moments[:5] %}
+                    <li class="rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5">
+                        <div class="flex items-center gap-2 mb-1 flex-wrap">
+                            <span class="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset {{ h.severity_class(m.severity) }}">{{ m.severity|capitalize }}</span>
+                            <span class="text-xs text-zinc-500">{{ (m.created_at or '')[:10] }}</span>
+                        </div>
+                        <p class="text-sm text-zinc-300">{{ m.note }}</p>
+                    </li>
+                    {% endfor %}
+                    {% if moments|length > 5 %}
+                    <li class="text-xs text-zinc-500 px-4">+ {{ moments|length - 5 }} older moment{{ '' if (moments|length - 5) == 1 else 's' }}</li>
+                    {% endif %}
+                </ul>
+            </div>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {# ── Recent calls ────────────────────────────────────────────────── #}
+    <section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Recent calls · last 90 days</h2>
+        {% if timeline %}
+        <div class="mt-3 overflow-hidden rounded-lg border border-zinc-800">
+            <table class="min-w-full divide-y divide-zinc-800 text-sm">
+                <thead class="bg-zinc-950/60">
+                    <tr class="text-left text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                        <th class="px-3 py-2">When</th>
+                        <th class="px-3 py-2">Lead</th>
+                        <th class="px-3 py-2">Outcome</th>
+                        <th class="px-3 py-2 text-right">Score</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-zinc-800/60">
+                    {% for c in timeline|reverse %}
+                    <tr onclick="window.location='{{ URL_PREFIX }}/ui/calls/{{ c.call_id }}'"
+                        class="cursor-pointer hover:bg-zinc-800/40 transition">
+                        <td class="px-3 py-2 text-zinc-300 tabular-nums whitespace-nowrap">{{ (c.called_at or '')[:16].replace('T', ' ') }}</td>
+                        <td class="px-3 py-2 text-zinc-200">{{ c.lead_name or '—' }}</td>
+                        <td class="px-3 py-2"><span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset {{ h.outcome_badge_class(c.outcome) }}">{{ h.outcome_label(c.outcome) }}</span></td>
+                        <td class="px-3 py-2 text-right">
+                            {% if c.overall is not none %}
+                                <span class="inline-flex items-center justify-center min-w-[2.25rem] rounded-md px-2 py-0.5 text-sm font-semibold tabular-nums ring-1 ring-inset {{ h.score_color_class(c.overall) }}">{{ c.overall }}</span>
+                            {% else %}<span class="text-zinc-500">—</span>{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="mt-3 text-sm text-zinc-500">No scored calls in the last 90 days.</p>
+        {% endif %}
+    </section>
+
 </div>
 {% endblock %}

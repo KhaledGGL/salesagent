@@ -1,13 +1,59 @@
 {% extends "base.html" %}
 {% block title %}Reps{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div>
-        <h1 class="text-2xl font-semibold text-white">Reps</h1>
-        <p class="mt-1 text-sm text-zinc-400">Performance and coaching trends per rep.</p>
-    </div>
-    <div class="rounded-lg border border-zinc-800/60 bg-zinc-900/60 p-12 text-center text-zinc-500">
-        Rep leaderboard coming next.
-    </div>
+
+<div class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight text-white">Reps</h1>
+    <p class="mt-1 text-sm text-zinc-400">30-day rolling performance per rep · {{ reps|length }} active</p>
 </div>
+
+{% if reps %}
+<div class="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/60">
+    <table class="min-w-full divide-y divide-zinc-800">
+        <thead class="bg-zinc-900/80">
+            <tr class="text-left text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                <th class="px-4 py-3">Rep</th>
+                <th class="px-4 py-3 text-right">Calls</th>
+                <th class="px-4 py-3 text-right">Sold</th>
+                <th class="px-4 py-3 text-right">Close rate</th>
+                <th class="px-4 py-3 text-right">Avg score</th>
+                <th class="px-4 py-3 text-right">Therapist mode</th>
+                <th class="px-4 py-3"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-zinc-800/60">
+            {% for r in reps %}
+                <tr onclick="window.location='{{ URL_PREFIX }}/ui/reps/{{ r.rep_id }}'"
+                    class="cursor-pointer hover:bg-zinc-800/40 transition">
+                    <td class="px-4 py-3 text-sm font-medium text-zinc-100">{{ r.rep_name }}</td>
+                    <td class="px-4 py-3 text-right text-sm text-zinc-300 tabular-nums">{{ r.total_calls or 0 }}</td>
+                    <td class="px-4 py-3 text-right text-sm text-zinc-300 tabular-nums">{{ r.sold_calls or 0 }}</td>
+                    <td class="px-4 py-3 text-right text-sm text-zinc-300 tabular-nums">
+                        {% if r.close_rate_pct is not none %}{{ r.close_rate_pct }}%{% else %}—{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                        {% if r.avg_overall_score is not none %}
+                            {% set s = (r.avg_overall_score|round|int) %}
+                            <span class="inline-flex items-center justify-center min-w-[2.5rem] rounded-md px-2 py-1 text-sm font-semibold tabular-nums ring-1 ring-inset {{ h.score_color_class(s) }}">{{ '%.1f'|format(r.avg_overall_score) }}</span>
+                        {% else %}<span class="text-zinc-500 text-sm">—</span>{% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-right text-sm tabular-nums">
+                        {% if r.therapist_mode_count and r.therapist_mode_count > 0 %}
+                            <span class="text-rose-400">🛑 {{ r.therapist_mode_count }}</span>
+                        {% else %}
+                            <span class="text-zinc-500">0</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-right text-zinc-600">→</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-12 text-center text-zinc-500">
+    No active reps yet.
+</div>
+{% endif %}
+
 {% endblock %}

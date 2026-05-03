@@ -1,8 +1,8 @@
 # Project Status — Sales Call Analyzer
 
-**Last updated:** 2026-04-14
-**Current commit:** `182b672`
-**Phase:** v0.1 deployed to production on Hostinger VPS at `api.gogrowlabs.com`.
+**Last updated:** 2026-05-03
+**Current commit:** `454b341` (URL_PREFIX fix; UI work is on master ahead of this)
+**Phase:** v0.2 — full management UI shipped, ready for client onboarding.
 
 > **Deploying this for the first time?** Read [`INSTALL.md`](./INSTALL.md)
 > for a complete step-by-step guide. This file is for tracking *what's
@@ -153,6 +153,41 @@ See `infra/caddy/README.md` for the full host setup walkthrough.
 
 **Note:** `APP_ENV=development` is set because GHL doesn't natively
 HMAC-sign webhook payloads. The webhook URL is private/unguessable.
+
+### Phase 2 — Management UI ✅ (shipped 2026-05-03)
+
+Server-rendered dark-themed dashboard for the 3 leadership users
+per client (CEO, Sales Manager, Client Manager). Stack: FastAPI +
+Jinja2 + HTMX + Tailwind + Chart.js (all CDN — no JS toolchain).
+
+**Pages live:**
+- `/ui/` — Overview with 5 KPI cards, top performers / needs-coaching
+  leaderboards (3-call qualification minimum), latest insights cards
+  (sales / coaching / marketing), 30-day rep table, recent calls feed
+- `/ui/calls` — filterable, paginated table (rep, outcome, source, window)
+  with bookmarkable URL state
+- `/ui/calls/:id` — full call detail: rep + lead + outcome with confidence
+  + evidence quote, score grid, AI summary, therapist banner, win/loss
+  moment, coaching moments + objections, full transcript
+- `/ui/reps` — 30-day performance table per rep, click for detail
+- `/ui/reps/:id` — per-rep stats, score trend chart, **coaching effectiveness
+  check** (avg score before vs after each coaching moment), coaching
+  history grouped by category, recent calls
+- `/ui/sources` — last-week per-source close rate + score quality + top
+  objections per source, plus 90-day cold-vs-warm comparison
+- `/ui/objections` — top objections this week with per-source breakdown,
+  30-day handling-quality rollup
+- `/ui/therapist-mode` — trend table per rep per week, recent flagged
+  calls with the AI's reason text
+- `/ui/reports` — archived weekly reports (sales / coaching / marketing
+  tabs) reading from the new `weekly_reports` table
+
+**Infra additions:**
+- `URL_PREFIX` env var for path-stripping reverse proxy (e.g. `/salesgrader`)
+- `weekly_reports` table (migration 007) persists each Monday's Claude-
+  generated reports so the UI archive doesn't need to re-run Claude
+- Caddy basicauth gate on `/ui/*` (per ONBOARDING.md) — webhooks stay public
+- 259 tests passing (94 new for UI routes, helpers, persistence)
 
 ## What's NOT done yet
 

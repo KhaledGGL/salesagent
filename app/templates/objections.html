@@ -1,13 +1,70 @@
 {% extends "base.html" %}
 {% block title %}Objections{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div>
-        <h1 class="text-2xl font-semibold text-white">Objections</h1>
-        <p class="mt-1 text-sm text-zinc-400">What prospects pushed back on, and how it was handled.</p>
-    </div>
-    <div class="rounded-lg border border-zinc-800/60 bg-zinc-900/60 p-12 text-center text-zinc-500">
-        Objection trend table coming next.
-    </div>
+
+<div class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight text-white">Objections</h1>
+    <p class="mt-1 text-sm text-zinc-400">What prospects pushed back on, and how reps handled it.</p>
 </div>
+
+{# ── Top objections this week ───────────────────────────────────────── #}
+<section class="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+    <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Top objections · last completed week</h2>
+
+    {% if rolled %}
+    <div class="mt-4 space-y-2">
+        {% for r in rolled %}
+        <div class="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+            <div class="flex items-center justify-between gap-3 mb-1.5">
+                <span class="text-sm font-medium text-zinc-100">{{ r.objection_type|capitalize }}</span>
+                <span class="text-xs text-zinc-400 tabular-nums">{{ r.frequency }} · {{ r.pct }}%</span>
+            </div>
+            {# Bar showing % of total #}
+            <div class="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                <div class="h-full bg-zinc-300/80" style="width: {{ r.pct }}%"></div>
+            </div>
+            {# Per-source breakdown #}
+            {% if r.sources %}
+            <div class="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+                {% for src, freq in r.sources.items() %}
+                <span class="inline-flex items-center rounded px-2 py-0.5 ring-1 ring-inset bg-zinc-900 text-zinc-400 ring-zinc-700/60">
+                    {{ src }} · {{ freq }}
+                </span>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p class="mt-3 text-sm text-zinc-500">No objections raised last week.</p>
+    {% endif %}
+</section>
+
+{# ── Handling quality rollup — 30 days ──────────────────────────────── #}
+{% if quality_counts %}
+<section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+    <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Handling quality · last 30 days</h2>
+    <p class="mt-1 text-xs text-zinc-500">How reps handled objections across the team. "Excellent" = prospect resolved their own concern after a reframe.</p>
+
+    {% set qtotal = quality_counts.values()|sum %}
+    <div class="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {% for q, color_class in [
+            ('excellent', 'emerald'),
+            ('good',      'sky'),
+            ('fair',      'amber'),
+            ('poor',      'rose'),
+        ] %}
+        {% set count = quality_counts.get(q, 0) %}
+        {% set pct = (count * 100 / qtotal)|round(1) if qtotal else 0 %}
+        <div class="rounded-lg border border-zinc-800 bg-zinc-950/40 p-4">
+            <div class="text-[10px] uppercase tracking-wider text-zinc-500">{{ q|capitalize }}</div>
+            <div class="mt-1 text-2xl font-semibold tabular-nums text-{{ color_class }}-400">{{ count }}</div>
+            <div class="text-xs text-zinc-500 tabular-nums">{{ pct }}%</div>
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
 {% endblock %}

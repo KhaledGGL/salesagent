@@ -1,9 +1,13 @@
-"""Smoke tests for the UI route stubs.
+"""Cross-cutting smoke tests for the UI routes.
 
-Phase 1 scope: every page renders with the shared base layout, the nav
-links to all the right places, and the active-tab highlight is correct.
-Data wiring is Phase 2 — these tests are deliberately structural, not
-about the data each page will eventually display.
+Each page renders with the shared base layout, the nav links are present,
+the active-tab highlight is correct, and dark mode classes ship. Data
+correctness for individual pages lives in their dedicated test files
+(test_ui_calls_list.py, test_ui_call_detail.py, etc.).
+
+Uses an autouse fixture that mocks Supabase across every UI route call
+with empty/permissive responses — enough for templates to render but
+not asserting any specific data.
 """
 
 import pytest
@@ -16,50 +20,84 @@ def client():
     return TestClient(app)
 
 
-# ── Each route returns 200 with HTML and the shared shell ───────────────────
+def _self_chaining(execute_data, count=None):
+    """Build a chain mock where every method returns self and only
+    .execute() returns a response object with .data and .count."""
+    from unittest.mock import MagicMock
+    chain = MagicMock()
+    for method in ("select", "gte", "lte", "eq", "neq", "order", "range",
+                   "limit", "maybe_single", "single", "filter"):
+        getattr(chain, method).return_value = chain
+    resp = MagicMock()
+    resp.data = execute_data
+    resp.count = count
+    chain.execute.return_value = resp
+    return chain
 
-# Routes that don't need a DB — pure stub or path-arg-only.
-# /ui/calls and /ui/calls/:id have their own dedicated test files
-# (test_ui_calls_list.py / test_ui_call_detail.py) because they query
-# Supabase and need full mocking.
+
+@pytest.fixture(autouse=True)
+def _stub_supabase(mocker):
+    """Mock Supabase for every UI route in this file.
+
+    The dashboard, reps list, sources, objections, therapist-mode, and
+    reports pages all just render whatever data we feed them. Empty data
+    keeps the templates rendering cleanly without 500s.
+
+    For /ui/reps/:id we plant a fake rep row so the route doesn't 404;
+    the rep_detail page's deeper data assertions live in its own file.
+    """
+    from unittest.mock import MagicMock
+
+    def _table(name):
+        # Most reads → empty. Single-row endpoints → small fake data.
+        if name == "reps":
+            chain = _self_chaining([], count=0)
+            # rep_detail uses .maybe_single() which we can't easily branch
+            # on here — give it a fallback fake rep so the page renders.
+            fake_rep_resp = MagicMock()
+            fake_rep_resp.data = {"id": "any", "name": "Fake Rep",
+                                  "email": None, "is_active": True,
+                                  "created_at": "2026-04-01T00:00:00Z"}
+            chain.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = fake_rep_resp
+            return chain
+        return _self_chaining([])
+
+    fake_db = MagicMock()
+    fake_db.table.side_effect = _table
+    mocker.patch("app.ui.routes.get_supabase", return_value=fake_db)
+
+
+# ── Smoke: every page returns 200 + HTML + the shared shell ─────────────────
+
 @pytest.mark.parametrize(
     "path",
     [
         "/ui/",
         "/ui/reps",
-        "/ui/reps/rep-uuid",
+        "/ui/reps/some-rep-id",
         "/ui/sources",
         "/ui/objections",
         "/ui/therapist-mode",
         "/ui/reports",
+        "/ui/reports?type=coaching",
+        "/ui/reports?type=marketing",
     ],
 )
 def test_route_returns_200_html(client, path):
     r = client.get(path)
-    assert r.status_code == 200
+    assert r.status_code == 200, f"{path} returned {r.status_code}: {r.text[:200]}"
     assert "text/html" in r.headers["content-type"]
     body = r.text
-    # Base shell markers
     assert "<!doctype html>" in body
     assert "Sales Coach" in body
-    # Nav must link to every other top-level page so users can navigate
-    # between sections without back-button gymnastics.
-    for link in (
-        '/ui/"',
-        "/ui/calls",
-        "/ui/reps",
-        "/ui/sources",
-        "/ui/objections",
-        "/ui/therapist-mode",
-        "/ui/reports",
-    ):
+    # Nav must link to every other top-level page
+    for link in ("/ui/calls", "/ui/reps", "/ui/sources",
+                 "/ui/objections", "/ui/therapist-mode", "/ui/reports"):
         assert link in body, f"nav missing {link} on {path}"
 
 
-# ── Active-tab highlighting (the small but important detail) ────────────────
+# ── Active nav highlight ────────────────────────────────────────────────────
 
-# /ui/calls/:id active-tab check lives in test_ui_call_detail.py
-# since that page needs DB mocks.
 @pytest.mark.parametrize(
     "path,expected_active",
     [
@@ -74,54 +112,33 @@ def test_route_returns_200_html(client, path):
 )
 def test_active_nav_highlight(client, path, expected_active):
     body = client.get(path).text
-    # The active link wraps its label in a <span class="font-medium">…</span>
     needle = f'font-medium">{expected_active}'
     assert needle in body, f"{path} should highlight {expected_active!r}"
 
 
-# ── Detail pages surface their ID parameter (proof the path arg is wired) ───
-# /ui/calls/:id is covered in test_ui_call_detail.py with proper DB mocks.
-
-def test_rep_detail_renders_rep_id(client):
-    body = client.get("/ui/reps/rep-9").text
-    assert "rep-9" in body
-
-
-# ── External assets are loaded via CDN (no JS toolchain in this project) ────
+# ── Layout / theme smoke checks ─────────────────────────────────────────────
 
 def test_base_layout_loads_required_cdn_scripts(client):
     body = client.get("/ui/").text
-    # Tailwind utility classes only work if the CDN script tag is present
     assert "cdn.tailwindcss.com" in body
-    # HTMX powers the interactive bits we'll add in Phase 2
     assert "htmx.org" in body
-    # Chart.js is there for the trend graphs the dashboard will render
     assert "chart.js" in body.lower()
 
 
-# ── Dark-mode visual smoke check ────────────────────────────────────────────
-# We intentionally chose a zinc-based dark palette. If someone accidentally
-# regresses to a light theme (bg-white body, etc.) this test catches it.
-
 def test_base_layout_uses_dark_zinc_palette(client):
     body = client.get("/ui/").text
-    assert "bg-zinc-950" in body, "body should be on the dark zinc-950 background"
-    assert 'class="dark"' in body, "html element should be marked .dark for any future tailwind dark: variants"
+    assert "bg-zinc-950" in body
+    assert 'class="dark"' in body
 
 
 # ── URL_PREFIX wiring (path-stripping reverse proxy support) ────────────────
 
-def test_url_prefix_applied_to_nav_links(monkeypatch, client):
-    """Behind a path-stripping proxy (Caddy handle_path /salesgrader/*), the
-    app sees clean /ui/* paths but every rendered link must include the
-    public prefix or browser navigation breaks."""
-    # Re-render the global with a non-empty prefix
+def test_url_prefix_applied_to_nav_links(client):
     from app.ui.routes import templates
     original = templates.env.globals.get("URL_PREFIX", "")
     templates.env.globals["URL_PREFIX"] = "/salesgrader"
     try:
         body = client.get("/ui/").text
-        # Every nav link should now be /salesgrader/ui/...
         assert 'href="/salesgrader/ui/"' in body
         assert 'href="/salesgrader/ui/calls"' in body
         assert 'href="/salesgrader/ui/reps"' in body
@@ -132,7 +149,14 @@ def test_url_prefix_applied_to_nav_links(monkeypatch, client):
 
 
 def test_url_prefix_empty_renders_clean_paths(client):
-    """Default (no proxy / local dev) — links stay as bare /ui/* paths."""
     body = client.get("/ui/").text
     assert 'href="/ui/calls"' in body
     assert 'href="/ui/reps"' in body
+
+
+# ── Detail-page path argument smoke (rep is shown via the autouse stub) ─────
+
+def test_rep_detail_renders_rep_data(client):
+    body = client.get("/ui/reps/rep-9").text
+    # The autouse stub returns a "Fake Rep" — confirms the join + render path
+    assert "Fake Rep" in body

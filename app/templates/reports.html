@@ -1,13 +1,245 @@
 {% extends "base.html" %}
 {% block title %}Reports{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div>
-        <h1 class="text-2xl font-semibold text-white">Weekly Reports</h1>
-        <p class="mt-1 text-sm text-zinc-400">Sales summary, coaching lesson, and marketing intelligence — one row per week.</p>
-    </div>
-    <div class="rounded-lg border border-zinc-800/60 bg-zinc-900/60 p-12 text-center text-zinc-500">
-        Reports archive coming next — read from the new weekly_reports table.
-    </div>
+
+<div class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight text-white">Weekly Reports</h1>
+    <p class="mt-1 text-sm text-zinc-400">Archive of every Monday's sales summary, coaching lesson, and marketing intel.</p>
 </div>
+
+{# ── Type tabs ──────────────────────────────────────────────────────── #}
+<div class="mb-6 flex gap-1 rounded-xl border border-zinc-800 bg-zinc-900/60 p-1 w-fit">
+    {% for key, label, hint in [
+        ('sales',     'Sales',     'org KPIs + leaderboards'),
+        ('coaching',  'Coaching',  'patterns Claude found'),
+        ('marketing', 'Marketing', 'source quality + positioning'),
+    ] %}
+    <a href="{{ URL_PREFIX }}/ui/reports?type={{ key }}"
+       class="rounded-lg px-4 py-2 text-sm transition
+              {% if rtype == key %}bg-zinc-800 text-zinc-100 font-medium{% else %}text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60{% endif %}">
+        {{ label }}
+        <span class="block text-[11px] {% if rtype == key %}text-zinc-400{% else %}text-zinc-600{% endif %}">{{ hint }}</span>
+    </a>
+    {% endfor %}
+</div>
+
+{# ── Reports list ─────────────────────────────────────────────────────── #}
+{% if reports %}
+<div class="space-y-4">
+    {% for rep in reports %}
+        {% set p = rep.payload or {} %}
+        <details class="group rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
+            <summary class="cursor-pointer list-none px-6 py-4 hover:bg-zinc-900/80 transition">
+                <div class="flex items-center justify-between gap-4 flex-wrap">
+                    <div>
+                        <div class="text-xs uppercase tracking-wider text-zinc-500">
+                            Week of {{ rep.week_start }}{% if rep.week_end and rep.week_end != rep.week_start %} → {{ rep.week_end }}{% endif %}
+                        </div>
+                        <div class="mt-1 text-base font-medium text-zinc-100">
+                            {% if rtype == 'sales' %}
+                                {{ p.overview.total_calls or 0 }} calls · {% if p.overview.close_rate_pct is not none %}{{ p.overview.close_rate_pct }}% close rate{% else %}—{% endif %}
+                            {% else %}
+                                {{ p.headline or 'Weekly report' }}
+                            {% endif %}
+                        </div>
+                    </div>
+                    <span class="text-zinc-600 text-sm group-open:rotate-90 transition">›</span>
+                </div>
+            </summary>
+
+            <div class="border-t border-zinc-800 px-6 py-4 space-y-5">
+
+                {# ── Sales report payload ───────────────────────────────── #}
+                {% if rtype == 'sales' %}
+                    {% set ov = p.overview or {} %}
+                    <div class="grid grid-cols-2 sm:grid-cols-5 gap-3">
+                        {% for label, val in [
+                            ("Calls",          ov.total_calls or 0),
+                            ("Sold",           ov.sold_calls or 0),
+                            ("Close rate",     (ov.close_rate_pct ~ '%') if ov.close_rate_pct is not none else '—'),
+                            ("Avg score",      ov.avg_overall_score or '—'),
+                            ("Therapist mode", ov.therapist_mode_count or 0),
+                        ] %}
+                        <div class="rounded-lg border border-zinc-800 bg-zinc-950/40 p-3">
+                            <div class="text-[10px] uppercase tracking-wider text-zinc-500">{{ label }}</div>
+                            <div class="mt-1 text-xl font-semibold tabular-nums text-zinc-100">{{ val }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    {% if p.rep_performance %}
+                    <div>
+                        <h4 class="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Per-rep performance</h4>
+                        <div class="overflow-hidden rounded-lg border border-zinc-800">
+                            <table class="min-w-full divide-y divide-zinc-800 text-sm">
+                                <thead class="bg-zinc-950/60">
+                                    <tr class="text-left text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                                        <th class="px-3 py-2">Rep</th>
+                                        <th class="px-3 py-2 text-right">Calls</th>
+                                        <th class="px-3 py-2 text-right">Sold</th>
+                                        <th class="px-3 py-2 text-right">Close</th>
+                                        <th class="px-3 py-2 text-right">Avg</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-zinc-800/60">
+                                    {% for rp in p.rep_performance %}
+                                    <tr>
+                                        <td class="px-3 py-2 text-zinc-100">{{ rp.rep_name }}</td>
+                                        <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ rp.total_calls or 0 }}</td>
+                                        <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ rp.sold_calls or 0 }}</td>
+                                        <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{% if rp.close_rate_pct is not none %}{{ rp.close_rate_pct }}%{% else %}—{% endif %}</td>
+                                        <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ rp.avg_overall_score or '—' }}</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if p.top_objections %}
+                    <div>
+                        <h4 class="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Top objections</h4>
+                        <ul class="space-y-1.5 text-sm">
+                            {% for o in p.top_objections[:8] %}
+                            <li class="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-2">
+                                <span class="text-zinc-200">{{ o.objection_type|capitalize }} <span class="text-zinc-500">· {{ o.lead_source or 'unknown' }}</span></span>
+                                <span class="text-zinc-400 tabular-nums">{{ o.frequency }}</span>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                {# ── Coaching lesson payload ────────────────────────────── #}
+                {% elif rtype == 'coaching' %}
+                    {% if p.weekly_focus %}
+                    <div class="rounded-lg border border-zinc-700 bg-zinc-950/40 p-4">
+                        <div class="text-xs uppercase tracking-wider text-zinc-500 mb-1">Focus for next week</div>
+                        <p class="text-sm text-zinc-100">{{ p.weekly_focus }}</p>
+                    </div>
+                    {% endif %}
+                    {% if p.category_insights %}
+                        {% for ci in p.category_insights %}
+                        <div>
+                            <h4 class="text-sm font-semibold text-zinc-100 mb-2">{{ h.category_label(ci.category) }}</h4>
+                            {% if ci.advice %}<p class="text-sm text-zinc-300 mb-3">{{ ci.advice }}</p>{% endif %}
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                {% if ci.best_examples %}
+                                <div>
+                                    <div class="text-[11px] uppercase tracking-wider text-emerald-400 mb-1.5">Best</div>
+                                    <ul class="space-y-1.5">
+                                        {% for ex in ci.best_examples %}
+                                        <li class="rounded border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-zinc-200">
+                                            <span class="font-medium text-emerald-300">{{ ex.rep_name }}:</span>
+                                            {{ ex.what_they_did }}
+                                            {% if ex.quote %}<div class="mt-1 italic text-zinc-400">"{{ ex.quote }}"</div>{% endif %}
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                                {% if ci.worst_examples %}
+                                <div>
+                                    <div class="text-[11px] uppercase tracking-wider text-rose-400 mb-1.5">Worst</div>
+                                    <ul class="space-y-1.5">
+                                        {% for ex in ci.worst_examples %}
+                                        <li class="rounded border border-rose-500/20 bg-rose-500/5 px-3 py-2 text-xs text-zinc-200">
+                                            <span class="font-medium text-rose-300">{{ ex.rep_name }}:</span>
+                                            {{ ex.what_they_did }}
+                                            {% if ex.quote %}<div class="mt-1 italic text-zinc-400">"{{ ex.quote }}"</div>{% endif %}
+                                        </li>
+                                        {% endfor %}
+                                    </ul>
+                                </div>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+
+                {# ── Marketing intel payload ────────────────────────────── #}
+                {% elif rtype == 'marketing' %}
+                    {% if p.messaging_angles %}
+                    <div>
+                        <h4 class="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Messaging angles</h4>
+                        <ul class="space-y-2">
+                            {% for ma in p.messaging_angles %}
+                            <li class="rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-3">
+                                <div class="flex items-center justify-between">
+                                    <span class="text-sm font-medium text-zinc-100">{{ ma.pain_point }}</span>
+                                    <span class="text-xs text-zinc-500 tabular-nums">{{ ma.frequency }}×</span>
+                                </div>
+                                {% if ma.example_quotes %}
+                                <ul class="mt-2 space-y-1">
+                                    {% for q in ma.example_quotes[:3] %}
+                                    <li class="text-xs italic text-zinc-400">"{{ q }}"</li>
+                                    {% endfor %}
+                                </ul>
+                                {% endif %}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    {% if p.source_analysis %}
+                    <div>
+                        <h4 class="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Source analysis</h4>
+                        <div class="space-y-2">
+                            {% for sa in p.source_analysis %}
+                            <div class="rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-3">
+                                <div class="flex items-center justify-between mb-1">
+                                    <span class="text-sm font-medium text-zinc-100">{{ sa.source }}</span>
+                                    {% if sa.close_rate is not none %}<span class="text-xs text-zinc-400 tabular-nums">{{ sa.close_rate }}% close</span>{% endif %}
+                                </div>
+                                {% if sa.quality_assessment %}<p class="text-xs text-zinc-300">{{ sa.quality_assessment }}</p>{% endif %}
+                                {% if sa.recommendation %}<p class="mt-1 text-xs text-zinc-400 italic">→ {{ sa.recommendation }}</p>{% endif %}
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if p.prequalification_recs %}
+                    <div>
+                        <h4 class="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Pre-qualification recs</h4>
+                        <ul class="space-y-1.5">
+                            {% for r in p.prequalification_recs %}
+                            <li class="rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5 text-xs">
+                                <div class="text-zinc-100">{{ r.recommendation }}</div>
+                                <div class="mt-1 text-zinc-400">{{ r.rationale }}</div>
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    {% if p.positioning_gaps %}
+                    <div>
+                        <h4 class="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">Positioning gaps</h4>
+                        <ul class="space-y-1.5">
+                            {% for g in p.positioning_gaps %}
+                            <li class="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-2.5 text-xs">
+                                <div class="font-medium text-amber-200">{{ g.gap }}</div>
+                                {% if g.evidence %}<div class="mt-1 text-zinc-300">Evidence: {{ g.evidence }}</div>{% endif %}
+                                {% if g.recommendation %}<div class="mt-1 text-zinc-400">→ {{ g.recommendation }}</div>{% endif %}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+                {% endif %}
+
+            </div>
+        </details>
+    {% endfor %}
+</div>
+{% else %}
+<div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-12 text-center text-zinc-500">
+    <p>No {{ rtype }} reports yet.</p>
+    <p class="mt-2 text-xs">Reports populate every Monday from the weekly Celery tasks.</p>
+</div>
+{% endif %}
+
 {% endblock %}

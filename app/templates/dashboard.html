@@ -1,14 +1,212 @@
 {% extends "base.html" %}
 {% block title %}Overview{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div>
-        <h1 class="text-2xl font-semibold text-white">Overview</h1>
-        <p class="mt-1 text-sm text-zinc-400">This week's performance at a glance.</p>
+
+<div class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight text-white">Overview</h1>
+    <p class="mt-1 text-sm text-zinc-400">
+        {% set ws = overview.get('week_start') %}
+        {% set we = overview.get('week_end') %}
+        {% if ws %}Week of {{ ws }}{% if we %} → {{ we }}{% endif %}{% else %}Last completed week{% endif %}
+    </p>
+</div>
+
+{# ── KPI cards ──────────────────────────────────────────────────────── #}
+{# Use .get() so empty overview ({}) doesn't blow up undefined access. #}
+{% set total_calls = overview.get('total_calls') or 0 %}
+{% set sold = overview.get('sold_calls') or 0 %}
+{% set close_rate = overview.get('close_rate_pct') %}
+{% set avg_score = overview.get('avg_overall_score') %}
+{% set tm_count = overview.get('therapist_mode_count') or 0 %}
+{% set tm_pct = (tm_count * 100 / total_calls)|round(1) if total_calls else 0 %}
+
+<section class="mb-6 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500">Calls</div>
+        <div class="mt-1 text-3xl font-semibold tabular-nums text-zinc-100">{{ total_calls }}</div>
+    </div>
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500">Sold</div>
+        <div class="mt-1 text-3xl font-semibold tabular-nums text-emerald-400">{{ sold }}</div>
+    </div>
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500">Close rate</div>
+        <div class="mt-1 text-3xl font-semibold tabular-nums text-zinc-100">
+            {% if close_rate is not none %}{{ close_rate }}<span class="text-base text-zinc-500">%</span>{% else %}<span class="text-zinc-600">—</span>{% endif %}
+        </div>
+    </div>
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500">Avg score</div>
+        <div class="mt-1 text-3xl font-semibold tabular-nums {% if avg_score is none %}text-zinc-600{% elif avg_score >= 8 %}text-emerald-400{% elif avg_score >= 5 %}text-amber-400{% else %}text-rose-400{% endif %}">
+            {{ avg_score if avg_score is not none else '—' }}
+        </div>
+    </div>
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-4">
+        <div class="text-[10px] uppercase tracking-wider text-zinc-500">Therapist mode</div>
+        <div class="mt-1 text-3xl font-semibold tabular-nums {% if tm_pct >= 20 %}text-rose-400{% elif tm_pct >= 10 %}text-amber-400{% else %}text-zinc-100{% endif %}">{{ tm_count }}<span class="text-base text-zinc-500"> / {{ tm_pct }}%</span></div>
+    </div>
+</section>
+
+{# ── Latest insights cards (Sales / Coaching / Marketing) ──────────── #}
+{% if latest_insights %}
+<section class="mb-6 grid grid-cols-1 lg:grid-cols-3 gap-3">
+    {% for key, label, hint, icon in [
+        ('sales',     'Sales summary',     'Last week\'s KPIs', '📊'),
+        ('coaching',  'Coaching lesson',   'Patterns Claude found',   '🎓'),
+        ('marketing', 'Marketing intel',   'Source quality + positioning', '📈'),
+    ] %}
+        {% set rep = latest_insights.get(key) %}
+        <a href="{{ URL_PREFIX }}/ui/reports?type={{ key }}"
+           class="group rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 hover:bg-zinc-900 transition">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-medium uppercase tracking-wider text-zinc-500">{{ icon }} {{ label }}</span>
+                {% if rep %}<span class="text-[11px] text-zinc-600">{{ rep.week_start }}</span>{% endif %}
+            </div>
+            {% if rep %}
+                {% set p = rep.payload or {} %}
+                {% if key == 'sales' %}
+                    {% set ov = p.overview or {} %}
+                    <div class="text-sm text-zinc-200 leading-relaxed">
+                        <span class="font-medium text-zinc-100">{{ ov.total_calls or 0 }} calls</span>
+                        with a <span class="font-medium text-zinc-100">{{ ov.close_rate_pct }}%</span> close rate.
+                        Avg score {{ ov.avg_overall_score or '—' }}/10.
+                    </div>
+                {% else %}
+                    <div class="text-sm text-zinc-200 leading-relaxed">{{ p.headline or 'See full report.' }}</div>
+                    {% if p.weekly_focus %}
+                        <div class="mt-2 text-xs text-zinc-400 italic">{{ p.weekly_focus }}</div>
+                    {% endif %}
+                {% endif %}
+                <div class="mt-3 text-xs text-zinc-500 group-hover:text-zinc-300 transition">Read full report →</div>
+            {% else %}
+                <div class="text-sm text-zinc-500">Not generated yet — runs Mondays.</div>
+            {% endif %}
+        </a>
+    {% endfor %}
+</section>
+{% endif %}
+
+{# ── Leaderboards ───────────────────────────────────────────────────── #}
+<section class="mb-6 grid grid-cols-1 lg:grid-cols-2 gap-3">
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-emerald-400">🟢 Top performers</h2>
+        <p class="mt-0.5 text-[11px] text-zinc-600">min 3 calls last week</p>
+        {% if top_performers %}
+        <ol class="mt-3 space-y-2">
+            {% for r in top_performers %}
+            <li>
+                <a href="{{ URL_PREFIX }}/ui/reps/{{ r.rep_id }}"
+                   class="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5 hover:bg-zinc-800/40 transition">
+                    <span class="text-sm font-medium text-zinc-100">{{ loop.index }}. {{ r.rep_name }}</span>
+                    <span class="text-sm tabular-nums">
+                        <span class="text-emerald-400 font-medium">{{ r.close_rate_pct or 0 }}%</span>
+                        <span class="text-zinc-500">· {{ r.avg_overall_score or '—' }}/10</span>
+                    </span>
+                </a>
+            </li>
+            {% endfor %}
+        </ol>
+        {% else %}
+        <p class="mt-3 text-sm text-zinc-500">Not enough data yet.</p>
+        {% endif %}
     </div>
 
-    <div class="rounded-lg border border-zinc-800/60 bg-zinc-900/60 p-12 text-center text-zinc-500">
-        Dashboard coming next — KPIs, leaderboards, alerts, trends.
+    <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-rose-400">🔴 Needs coaching</h2>
+        <p class="mt-0.5 text-[11px] text-zinc-600">min 3 calls last week</p>
+        {% if needs_coaching %}
+        <ol class="mt-3 space-y-2">
+            {% for r in needs_coaching %}
+            <li>
+                <a href="{{ URL_PREFIX }}/ui/reps/{{ r.rep_id }}"
+                   class="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5 hover:bg-zinc-800/40 transition">
+                    <span class="text-sm font-medium text-zinc-100">{{ loop.index }}. {{ r.rep_name }}</span>
+                    <span class="text-sm tabular-nums">
+                        <span class="text-rose-400 font-medium">{{ r.avg_overall_score or '—' }}/10</span>
+                        <span class="text-zinc-500">· {{ r.close_rate_pct or 0 }}%</span>
+                    </span>
+                </a>
+            </li>
+            {% endfor %}
+        </ol>
+        {% else %}
+        <p class="mt-3 text-sm text-zinc-500">No reps qualifying — could mean low volume or all-good week.</p>
+        {% endif %}
     </div>
-</div>
+</section>
+
+{# ── 30-day rep table ────────────────────────────────────────────────── #}
+{% if rep_30d %}
+<section class="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+    <div class="flex items-center justify-between mb-3">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">All reps · 30-day rolling</h2>
+        <a href="{{ URL_PREFIX }}/ui/reps" class="text-xs text-zinc-400 hover:text-zinc-200 transition">See all →</a>
+    </div>
+    <div class="overflow-hidden rounded-lg border border-zinc-800">
+        <table class="min-w-full divide-y divide-zinc-800 text-sm">
+            <thead class="bg-zinc-950/60">
+                <tr class="text-left text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                    <th class="px-3 py-2">Rep</th>
+                    <th class="px-3 py-2 text-right">Calls</th>
+                    <th class="px-3 py-2 text-right">Close</th>
+                    <th class="px-3 py-2 text-right">Avg</th>
+                    <th class="px-3 py-2 text-right">TM</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-zinc-800/60">
+                {% for r in rep_30d %}
+                <tr onclick="window.location='{{ URL_PREFIX }}/ui/reps/{{ r.rep_id }}'"
+                    class="cursor-pointer hover:bg-zinc-800/40 transition">
+                    <td class="px-3 py-2 text-zinc-100">{{ r.rep_name }}</td>
+                    <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ r.total_calls or 0 }}</td>
+                    <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{% if r.close_rate_pct is not none %}{{ r.close_rate_pct }}%{% else %}—{% endif %}</td>
+                    <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ r.avg_overall_score or '—' }}</td>
+                    <td class="px-3 py-2 text-right tabular-nums">
+                        {% if r.therapist_mode_count and r.therapist_mode_count > 0 %}<span class="text-rose-400">{{ r.therapist_mode_count }}</span>{% else %}<span class="text-zinc-500">0</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+
+{# ── Recent calls feed ─────────────────────────────────────────────── #}
+<section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+    <div class="flex items-center justify-between mb-3">
+        <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Recent calls</h2>
+        <a href="{{ URL_PREFIX }}/ui/calls" class="text-xs text-zinc-400 hover:text-zinc-200 transition">See all →</a>
+    </div>
+    {% if recent_calls %}
+    <ul class="space-y-1.5">
+        {% for c in recent_calls %}
+            {% set rep = c.reps or {} %}
+            {% set sc = (c.call_scores or [{}])[0] %}
+            <li>
+                <a href="{{ URL_PREFIX }}/ui/calls/{{ c.id }}"
+                   class="flex items-center justify-between gap-3 rounded-lg border border-zinc-800 bg-zinc-950/40 px-4 py-2.5 hover:bg-zinc-800/40 transition">
+                    <div class="flex items-center gap-3 min-w-0">
+                        {% if sc and sc.overall_score is not none %}
+                            <span class="inline-flex items-center justify-center min-w-[2.25rem] rounded-md px-2 py-0.5 text-sm font-semibold tabular-nums ring-1 ring-inset {{ h.score_color_class(sc.overall_score) }}">{{ sc.overall_score }}</span>
+                        {% else %}
+                            <span class="inline-flex items-center justify-center min-w-[2.25rem] rounded-md px-2 py-0.5 text-xs ring-1 ring-inset bg-zinc-800/60 text-zinc-500 ring-zinc-700/60">{{ c.status[:3] if c.status else '—' }}</span>
+                        {% endif %}
+                        <span class="text-sm font-medium text-zinc-100 truncate">{{ rep.name or 'Unknown' }}</span>
+                        <span class="text-sm text-zinc-500 truncate">· {{ c.lead_name or '—' }}</span>
+                        {% if sc and sc.therapist_mode_flag %}<span class="text-rose-400" title="Therapist mode">🛑</span>{% endif %}
+                    </div>
+                    <div class="flex items-center gap-3 flex-shrink-0">
+                        <span class="inline-flex items-center rounded-full px-2 py-0.5 text-xs ring-1 ring-inset {{ h.outcome_badge_class(c.outcome) }}">{{ h.outcome_label(c.outcome) }}</span>
+                        <span class="text-xs text-zinc-500 tabular-nums whitespace-nowrap">{{ (c.called_at or '')[:16].replace('T', ' ') }}</span>
+                    </div>
+                </a>
+            </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-zinc-500">No calls yet.</p>
+    {% endif %}
+</section>
+
 {% endblock %}

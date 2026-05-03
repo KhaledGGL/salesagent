@@ -1,13 +1,88 @@
 {% extends "base.html" %}
 {% block title %}Therapist Mode{% endblock %}
 {% block content %}
-<div class="space-y-6">
-    <div>
-        <h1 class="text-2xl font-semibold text-white">Therapist Mode</h1>
-        <p class="mt-1 text-sm text-zinc-400">Calls flagged for over-empathizing instead of diagnosing.</p>
-    </div>
-    <div class="rounded-lg border border-zinc-800/60 bg-zinc-900/60 p-12 text-center text-zinc-500">
-        Therapist mode trend + flagged-call list coming next.
-    </div>
+
+<div class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight text-white">Therapist Mode</h1>
+    <p class="mt-1 text-sm text-zinc-400">
+        Calls where the rep over-empathized or coached the prospect instead of running the NEPQ diagnosis. Leading indicator of weak closes.
+    </p>
 </div>
+
+{# ── Trend table ────────────────────────────────────────────────────── #}
+{% if trend %}
+<section class="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+    <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Trend · therapist-mode % per rep per week</h2>
+
+    <div class="mt-4 overflow-hidden rounded-lg border border-zinc-800">
+        <table class="min-w-full divide-y divide-zinc-800 text-sm">
+            <thead class="bg-zinc-950/60">
+                <tr class="text-left text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                    <th class="px-3 py-2">Week</th>
+                    <th class="px-3 py-2">Rep</th>
+                    <th class="px-3 py-2 text-right">Calls</th>
+                    <th class="px-3 py-2 text-right">Flagged</th>
+                    <th class="px-3 py-2 text-right">Rate</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-zinc-800/60">
+                {% for t in trend %}
+                <tr>
+                    <td class="px-3 py-2 text-zinc-300 tabular-nums">{{ t.week_start }}</td>
+                    <td class="px-3 py-2 text-zinc-100">{{ t.rep_name }}</td>
+                    <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ t.total_calls }}</td>
+                    <td class="px-3 py-2 text-right text-zinc-300 tabular-nums">{{ t.therapist_mode_calls }}</td>
+                    <td class="px-3 py-2 text-right tabular-nums">
+                        {% set pct = t.therapist_mode_pct or 0 %}
+                        {% if pct >= 20 %}
+                            <span class="text-rose-400">{{ pct }}%</span>
+                        {% elif pct >= 10 %}
+                            <span class="text-amber-400">{{ pct }}%</span>
+                        {% else %}
+                            <span class="text-zinc-400">{{ pct }}%</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</section>
+{% endif %}
+
+{# ── Recent flagged calls ───────────────────────────────────────────── #}
+<section class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+    <h2 class="text-xs font-semibold uppercase tracking-wider text-zinc-500">Recently flagged · last 30 days</h2>
+
+    {% if flagged %}
+    <ul class="mt-4 space-y-2">
+        {% for f in flagged %}
+            {% set rep = f.reps or {} %}
+            {% set sc = (f.call_scores or [{}])[0] %}
+            <li>
+                <a href="{{ URL_PREFIX }}/ui/calls/{{ f.id }}"
+                   class="block rounded-lg border border-rose-500/20 bg-rose-500/5 px-4 py-3 hover:bg-rose-500/10 transition">
+                    <div class="flex items-center justify-between gap-3 mb-1 flex-wrap">
+                        <div class="flex items-center gap-2">
+                            <span class="text-rose-400">🛑</span>
+                            <span class="text-sm font-medium text-zinc-100">{{ rep.name or 'Unknown rep' }}</span>
+                            {% if f.lead_name %}<span class="text-xs text-zinc-500">· {{ f.lead_name }}</span>{% endif %}
+                        </div>
+                        <div class="flex items-center gap-3 text-xs text-zinc-500 tabular-nums">
+                            {% if f.called_at %}{{ f.called_at[:10] }}{% endif %}
+                            {% if sc.overall_score is not none %}<span class="text-zinc-400">· {{ sc.overall_score }}/10</span>{% endif %}
+                        </div>
+                    </div>
+                    {% if sc.therapist_mode_reason %}
+                    <p class="text-sm italic text-zinc-300">{{ sc.therapist_mode_reason }}</p>
+                    {% endif %}
+                </a>
+            </li>
+        {% endfor %}
+    </ul>
+    {% else %}
+    <p class="mt-3 text-sm text-zinc-500">No therapist-mode flags in the last 30 days. 🟢</p>
+    {% endif %}
+</section>
+
 {% endblock %}
