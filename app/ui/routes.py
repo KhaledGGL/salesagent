@@ -12,8 +12,9 @@ shared base layout; data wiring lands in Phase 2.
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
@@ -121,48 +122,124 @@ async def dashboard(request: Request) -> HTMLResponse:
     )
 
 
+def _apply_in_filter(q, field: str, values: list[str], op: str):
+    """Apply IN / NOT IN filter to a Supabase query builder.
+
+    Empty values list = no-op (no filter applied → all values pass).
+    op='not_in' uses .filter() with PostgREST's not.in(...) operator
+    since supabase-py 2.28's higher-level NOT chain isn't reliable.
+    """
+    if not values:
+        return q
+    if op == "not_in":
+        # PostgREST list values must be parenthesised
+        return q.filter(field, "not.in", "(" + ",".join(values) + ")")
+    return q.in_(field, values)
+
+
+def _distinct_text_values(db, column: str, limit: int = 500) -> list[str]:
+    """Pull distinct non-null values from a calls column for a dropdown.
+
+    Done in Python because supabase-py doesn't expose DISTINCT directly.
+    Cheap on small tables (one round-trip, capped fetch). For a multi-
+    tenant single-VPS-per-client deployment this stays well under any
+    relevant ceiling.
+    """
+    rows = (
+        db.table("calls")
+        .select(column)
+        .not_.is_(column, "null")
+        .limit(limit)
+        .execute()
+        .data
+        or []
+    )
+    return sorted({r[column] for r in rows if r.get(column)})
+
+
 @router.get("/calls", response_class=HTMLResponse)
 async def calls_list(
     request: Request,
-    rep_id: str | None = None,
-    outcome: str | None = None,
-    source: str | None = None,
-    days: int = 30,
-    page: int = 1,
+    # Multi-value filters: each can be passed multiple times in the query
+    # string (?rep_id=r1&rep_id=r2). Each has a paired _op selecting
+    # include vs. exclude semantics.
+    rep_id:        list[str] = Query(default=[]),
+    rep_op:        str       = "in",
+    outcome:       list[str] = Query(default=[]),
+    outcome_op:    str       = "in",
+    source:        list[str] = Query(default=[]),
+    source_op:     str       = "in",
+    utm_source:    list[str] = Query(default=[]),
+    utm_source_op: str       = "in",
+    utm_medium:    list[str] = Query(default=[]),
+    utm_medium_op: str       = "in",
+    # Free-text contains filters for unbounded UTM fields
+    utm_campaign:  str       = "",
+    utm_content:   str       = "",
+    utm_term:      str       = "",
+    # Date range — overrides `days` if either bound is set
+    start_date:    str       = "",
+    end_date:      str       = "",
+    days:          int       = 30,
+    page:          int       = 1,
 ) -> HTMLResponse:
     """Filterable, paginated list of recent calls.
 
-    Filters are passed as query params so each combination is a
-    bookmarkable URL — no HTMX needed for v1, plain GET form submit.
+    Filter semantics:
+      - Within a single field: OR (e.g. outcome IN sold, follow_up)
+      - Across fields:         AND (e.g. (rep IN [Sarah, Mike]) AND (source = meta))
+      - Per-field include/exclude via the matching _op param
+      - Free-text fields use case-insensitive 'contains'
+
+    Every combination is a bookmarkable URL (plain GET form submit, no JS).
     """
     db = get_supabase()
 
-    # Reps for the filter dropdown — small table, one round-trip.
+    # ── Dropdown options ──────────────────────────────────────────────
     reps = db.table("reps").select("id, name").order("name").execute().data or []
+    utm_source_options = _distinct_text_values(db, "utm_source")
+    utm_medium_options = _distinct_text_values(db, "utm_medium")
 
-    # Time window — default 30 days mirrors v_rep_performance_30d.
-    cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=max(days, 1))).isoformat()
-
-    # Base query. We embed the rep name + just the score fields the table
-    # row needs (avoid pulling the full scorecard into a list view).
+    # ── Build the calls query ─────────────────────────────────────────
     q = (
         db.table("calls")
         .select(
             "id, lead_name, lead_source, outcome, called_at, status, rep_id, "
+            "utm_source, utm_campaign, "
             "reps(name), call_scores(overall_score, therapist_mode_flag)",
             count="exact",
         )
-        .gte("called_at", cutoff_iso)
         .order("called_at", desc=True)
     )
-    if rep_id:
-        q = q.eq("rep_id", rep_id)
-    if outcome:
-        q = q.eq("outcome", outcome)
-    if source:
-        q = q.eq("lead_source", source)
 
-    # Pagination via .range — Supabase translates this to LIMIT/OFFSET.
+    # Date bounds — explicit dates win over the preset window
+    if start_date or end_date:
+        if start_date:
+            q = q.gte("called_at", start_date)
+        if end_date:
+            # Make end_date inclusive — bump to end-of-day if user passed YYYY-MM-DD
+            end_iso = end_date if "T" in end_date else f"{end_date}T23:59:59+00:00"
+            q = q.lte("called_at", end_iso)
+    elif days:
+        cutoff_iso = (datetime.now(timezone.utc) - timedelta(days=max(days, 1))).isoformat()
+        q = q.gte("called_at", cutoff_iso)
+
+    # Multi-value filters with include/exclude
+    q = _apply_in_filter(q, "rep_id",      rep_id,      rep_op)
+    q = _apply_in_filter(q, "outcome",     outcome,     outcome_op)
+    q = _apply_in_filter(q, "lead_source", source,      source_op)
+    q = _apply_in_filter(q, "utm_source",  utm_source,  utm_source_op)
+    q = _apply_in_filter(q, "utm_medium",  utm_medium,  utm_medium_op)
+
+    # Free-text 'contains' for unbounded UTM fields
+    if utm_campaign:
+        q = q.ilike("utm_campaign", f"%{utm_campaign}%")
+    if utm_content:
+        q = q.ilike("utm_content", f"%{utm_content}%")
+    if utm_term:
+        q = q.ilike("utm_term", f"%{utm_term}%")
+
+    # Pagination
     page = max(page, 1)
     start = (page - 1) * CALLS_PER_PAGE
     q = q.range(start, start + CALLS_PER_PAGE - 1)
@@ -172,22 +249,64 @@ async def calls_list(
     total = getattr(resp, "count", None) or 0
     total_pages = max((total + CALLS_PER_PAGE - 1) // CALLS_PER_PAGE, 1)
 
+    # ── Build a stable query-string for pagination links that preserves
+    # every active filter (so 'Next →' on a filtered view stays filtered).
+    qs_params: list[tuple[str, str]] = []
+    for v in rep_id:     qs_params.append(("rep_id", v))
+    if rep_op != "in":   qs_params.append(("rep_op", rep_op))
+    for v in outcome:    qs_params.append(("outcome", v))
+    if outcome_op != "in": qs_params.append(("outcome_op", outcome_op))
+    for v in source:     qs_params.append(("source", v))
+    if source_op != "in": qs_params.append(("source_op", source_op))
+    for v in utm_source: qs_params.append(("utm_source", v))
+    if utm_source_op != "in": qs_params.append(("utm_source_op", utm_source_op))
+    for v in utm_medium: qs_params.append(("utm_medium", v))
+    if utm_medium_op != "in": qs_params.append(("utm_medium_op", utm_medium_op))
+    if utm_campaign:     qs_params.append(("utm_campaign", utm_campaign))
+    if utm_content:      qs_params.append(("utm_content", utm_content))
+    if utm_term:         qs_params.append(("utm_term", utm_term))
+    if start_date:       qs_params.append(("start_date", start_date))
+    if end_date:         qs_params.append(("end_date", end_date))
+    if not (start_date or end_date) and days != 30:
+        qs_params.append(("days", str(days)))
+    page_qs = urlencode(qs_params)
+
     return _render(
         request,
         "calls.html",
         active="calls",
         calls=calls,
         reps=reps,
+        utm_source_options=utm_source_options,
+        utm_medium_options=utm_medium_options,
         filters={
-            "rep_id": rep_id or "",
-            "outcome": outcome or "",
-            "source": source or "",
-            "days": days,
+            "rep_id":          rep_id,
+            "rep_op":          rep_op,
+            "outcome":         outcome,
+            "outcome_op":      outcome_op,
+            "source":          source,
+            "source_op":       source_op,
+            "utm_source":      utm_source,
+            "utm_source_op":   utm_source_op,
+            "utm_medium":      utm_medium,
+            "utm_medium_op":   utm_medium_op,
+            "utm_campaign":    utm_campaign,
+            "utm_content":     utm_content,
+            "utm_term":        utm_term,
+            "start_date":      start_date,
+            "end_date":        end_date,
+            "days":            days,
         },
+        any_filter_active=bool(
+            rep_id or outcome or source or utm_source or utm_medium
+            or utm_campaign or utm_content or utm_term
+            or start_date or end_date
+        ),
         page=page,
         total=total,
         total_pages=total_pages,
         per_page=CALLS_PER_PAGE,
+        page_qs=page_qs,
     )
 
 
