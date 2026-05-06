@@ -28,6 +28,28 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgb(63 63 70 / 0.6); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgb(82 82 91 / 0.8); }
+
+        /* Tell the browser our UI is dark so native form controls (date
+           picker popup, scrollbars on Firefox, dropdown menus) render in
+           dark mode instead of bright white. */
+        :root { color-scheme: dark; }
+
+        /* The native date-picker calendar icon is rendered as a black
+           glyph — invisible against a dark input. Invert it so it shows
+           up clearly, and grow the hit target so the whole field is
+           obviously clickable. */
+        input[type="date"] {
+            cursor: pointer;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator {
+            filter: invert(1) brightness(0.85);
+            cursor: pointer;
+            opacity: 0.7;
+            padding: 4px;
+        }
+        input[type="date"]::-webkit-calendar-picker-indicator:hover {
+            opacity: 1;
+        }
     </style>
 </head>
 <body class="min-h-screen bg-zinc-950 text-zinc-100 antialiased selection:bg-zinc-700">
