@@ -51,14 +51,19 @@ def _stub_supabase(mocker):
     def _table(name):
         # Most reads → empty. Single-row endpoints → small fake data.
         if name == "reps":
-            chain = _self_chaining([], count=0)
             # rep_detail uses .maybe_single() which we can't easily branch
             # on here — give it a fallback fake rep so the page renders.
+            # We MUST give the maybe_single path its own MagicMock chain so
+            # the override doesn't overwrite chain.execute() and break the
+            # list-shaped queries the dashboard does (`.select().execute()`).
+            chain = _self_chaining([], count=0)
+            single_chain = MagicMock()
             fake_rep_resp = MagicMock()
             fake_rep_resp.data = {"id": "any", "name": "Fake Rep",
                                   "email": None, "is_active": True,
                                   "created_at": "2026-04-01T00:00:00Z"}
-            chain.select.return_value.eq.return_value.maybe_single.return_value.execute.return_value = fake_rep_resp
+            single_chain.execute.return_value = fake_rep_resp
+            chain.select.return_value.eq.return_value.maybe_single.return_value = single_chain
             return chain
         return _self_chaining([])
 

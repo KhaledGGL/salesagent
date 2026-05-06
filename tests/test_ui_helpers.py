@@ -121,3 +121,76 @@ class TestFormatters:
     ])
     def test_format_duration_minutes(self, seconds, expected):
         assert h.format_duration_minutes(seconds) == expected
+
+
+class TestComputeOverviewFromRows:
+    """Live KPI aggregation that replaces v_weekly_overview on the dashboard."""
+
+    def test_empty_rows_yield_zero_totals_and_none_averages(self):
+        ov = h.compute_overview_from_rows([])
+        assert ov == {
+            "total_calls": 0, "sold_calls": 0,
+            "close_rate_pct": None, "avg_overall_score": None,
+            "therapist_mode_count": 0,
+        }
+
+    def test_only_scored_rows_count(self):
+        rows = [
+            # Two scored, mixed outcomes
+            {"status": "scored", "outcome": "sold",
+             "call_scores": {"overall_score": 9, "therapist_mode_flag": False}},
+            {"status": "scored", "outcome": "not_sold",
+             "call_scores": {"overall_score": 5, "therapist_mode_flag": True}},
+            # Pending — should be ignored entirely
+            {"status": "pending", "outcome": "sold",
+             "call_scores": None},
+        ]
+        ov = h.compute_overview_from_rows(rows)
+        assert ov["total_calls"] == 2
+        assert ov["sold_calls"] == 1
+        assert ov["close_rate_pct"] == 50.0
+        assert ov["avg_overall_score"] == 7.0
+        assert ov["therapist_mode_count"] == 1
+
+    def test_handles_list_shaped_call_scores_embed(self):
+        # PostgREST sometimes embeds the score as a list — first_or_dict
+        # normalizes it
+        rows = [
+            {"status": "scored", "outcome": "sold",
+             "call_scores": [{"overall_score": 8, "therapist_mode_flag": False}]},
+        ]
+        assert h.compute_overview_from_rows(rows)["avg_overall_score"] == 8.0
+
+
+class TestComputeRepPerfFromRows:
+    def test_groups_by_rep_and_resolves_names(self):
+        rows = [
+            {"status": "scored", "outcome": "sold", "rep_id": "r1",
+             "call_scores": {"overall_score": 9, "therapist_mode_flag": False}},
+            {"status": "scored", "outcome": "not_sold", "rep_id": "r1",
+             "call_scores": {"overall_score": 7, "therapist_mode_flag": False}},
+            {"status": "scored", "outcome": "sold", "rep_id": "r2",
+             "call_scores": {"overall_score": 6, "therapist_mode_flag": True}},
+        ]
+        out = h.compute_rep_perf_from_rows(rows, {"r1": "Sarah", "r2": "Mike"})
+        by_id = {r["rep_id"]: r for r in out}
+        assert by_id["r1"]["rep_name"] == "Sarah"
+        assert by_id["r1"]["total_calls"] == 2
+        assert by_id["r1"]["sold_calls"] == 1
+        assert by_id["r1"]["close_rate_pct"] == 50.0
+        assert by_id["r1"]["avg_overall_score"] == 8.0
+        assert by_id["r2"]["therapist_mode_count"] == 1
+
+    def test_unknown_rep_falls_back_to_unknown_label(self):
+        rows = [{"status": "scored", "outcome": "sold", "rep_id": "ghost",
+                 "call_scores": {"overall_score": 7}}]
+        out = h.compute_rep_perf_from_rows(rows, {})
+        assert out[0]["rep_name"] == "Unknown"
+
+    def test_skips_pending_and_missing_rep(self):
+        rows = [
+            {"status": "pending", "rep_id": "r1", "outcome": "sold", "call_scores": None},
+            {"status": "scored", "rep_id": None, "outcome": "sold",
+             "call_scores": {"overall_score": 9}},
+        ]
+        assert h.compute_rep_perf_from_rows(rows, {"r1": "Sarah"}) == []

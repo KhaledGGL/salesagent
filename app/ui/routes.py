@@ -26,6 +26,79 @@ from config import settings
 # small enough that the page renders fast even on a fresh DB.
 CALLS_PER_PAGE = 25
 
+# Dashboard time-range options — kept in declaration order so the template
+# renders the pills in this sequence. The first entry is the default.
+DASHBOARD_RANGES: list[tuple[str, str]] = [
+    ("last_7_days",  "Last 7 days"),
+    ("last_week",    "Last week"),
+    ("this_week",    "This week"),
+    ("this_month",   "This month"),
+    ("last_month",   "Last month"),
+    ("last_30_days", "Last 30 days"),
+]
+_VALID_RANGES = {key for key, _ in DASHBOARD_RANGES}
+
+
+def _resolve_range(key: str) -> tuple[str, str, str, str]:
+    """Resolve a range key to (start_iso, end_iso, label, sub_label).
+
+    All bounds are UTC; the interval is half-open [start, end). For
+    rolling ranges the end is `now` (so newly-scored calls show up
+    immediately); for completed ranges (last_week, last_month) the end
+    is the start of the next period (Monday / 1st-of-month).
+
+    `sub_label` is a short human range like "Apr 28 → May 4" or
+    "Rolling 7 days" for display under the page title.
+
+    Note: weeks use Mon-as-first-day in UTC, matching the existing
+    weekly views' behaviour. Clients in PT will see week boundaries
+    that don't match their wall-clock perfectly — adequate for v1
+    given the leadership audience; revisit when we onboard a non-UTC
+    client and they care.
+    """
+    now = datetime.now(timezone.utc)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    monday_this = today - timedelta(days=today.weekday())  # this week's Monday 00:00 UTC
+
+    def _fmt(d):
+        return d.date().isoformat()
+
+    if key == "last_week":
+        end = monday_this
+        start = end - timedelta(days=7)
+        return start.isoformat(), end.isoformat(), "Last week", \
+            f"{_fmt(start)} → {_fmt(end - timedelta(days=1))}"
+
+    if key == "this_week":
+        start = monday_this
+        return start.isoformat(), now.isoformat(), "This week", \
+            f"{_fmt(start)} → today"
+
+    if key == "this_month":
+        start = today.replace(day=1)
+        return start.isoformat(), now.isoformat(), "This month", \
+            f"{_fmt(start)} → today"
+
+    if key == "last_month":
+        first_of_this = today.replace(day=1)
+        # Step back exactly one month — handle Jan→Dec wrap explicitly
+        # to avoid relativedelta dependency for one call site.
+        if first_of_this.month == 1:
+            start = first_of_this.replace(year=first_of_this.year - 1, month=12)
+        else:
+            start = first_of_this.replace(month=first_of_this.month - 1)
+        end = first_of_this
+        return start.isoformat(), end.isoformat(), "Last month", \
+            f"{_fmt(start)} → {_fmt(end - timedelta(days=1))}"
+
+    if key == "last_30_days":
+        start = now - timedelta(days=30)
+        return start.isoformat(), now.isoformat(), "Last 30 days", "Rolling 30 days"
+
+    # Default: last 7 days (rolling)
+    start = now - timedelta(days=7)
+    return start.isoformat(), now.isoformat(), "Last 7 days", "Rolling 7 days"
+
 # templates/ lives at app/templates/, this file at app/ui/routes.py
 _TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -51,20 +124,42 @@ def _render(request: Request, template: str, active: str, **ctx) -> HTMLResponse
 
 
 @router.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request) -> HTMLResponse:
-    """Landing page — KPI cards, leaderboard, alerts, latest insights, recent calls."""
+async def dashboard(
+    request: Request,
+    range: str = Query(default="last_7_days", alias="range"),
+) -> HTMLResponse:
+    """Landing page — KPI cards, leaderboards, latest insights, recent calls.
+
+    The KPI cards and leaderboards are computed live for the selected
+    window (`?range=last_7_days|last_week|this_week|this_month|last_month|last_30_days`).
+    The 30-day rep table, latest weekly insights, and recent-calls feed
+    are window-independent.
+    """
     db = get_supabase()
 
-    # Org-wide overview for the previous completed week
-    overview_resp = db.table("v_weekly_overview").select("*").execute()
-    overview_rows = overview_resp.data or []
-    overview = overview_rows[0] if overview_rows else {}
+    range_key = range if range in _VALID_RANGES else "last_7_days"
+    start_iso, end_iso, range_label, range_sub = _resolve_range(range_key)
 
-    # Per-rep performance — same view the weekly Slack report uses.
-    # Min 3 calls to qualify for leaderboards (avoids single-call outliers).
-    rep_perf = (
-        db.table("v_rep_performance_weekly").select("*").execute().data or []
+    # ── Live in-window aggregation ────────────────────────────────────
+    # One round-trip for the calls in range; one for the rep name lookup
+    # so the leaderboards can show display names without a join.
+    in_range = (
+        db.table("calls")
+        .select("id, outcome, status, rep_id, "
+                "call_scores(overall_score, therapist_mode_flag)")
+        .gte("called_at", start_iso)
+        .lt("called_at", end_iso)
+        .execute()
+        .data
+        or []
     )
+    reps_lookup = db.table("reps").select("id, name").execute().data or []
+    reps_by_id = {r["id"]: r["name"] for r in reps_lookup}
+
+    overview = helpers.compute_overview_from_rows(in_range)
+    rep_perf = helpers.compute_rep_perf_from_rows(in_range, reps_by_id)
+
+    # Min 3 calls to qualify for leaderboards (avoids single-call outliers).
     qualified = [r for r in rep_perf if (r.get("total_calls") or 0) >= 3]
     top_performers = sorted(
         qualified,
@@ -76,7 +171,8 @@ async def dashboard(request: Request) -> HTMLResponse:
         key=lambda r: (r.get("avg_overall_score") or 99),
     )[:3]
 
-    # 30-day rolling rep table for the trend section
+    # 30-day rolling rep table for the trend section (window-independent —
+    # this is the long-view comparison and stays at 30 days regardless).
     rep_30d = (
         db.table("v_rep_performance_30d").select("*").execute().data or []
     )
@@ -114,6 +210,10 @@ async def dashboard(request: Request) -> HTMLResponse:
         "dashboard.html",
         active="dashboard",
         overview=overview,
+        range_key=range_key,
+        range_label=range_label,
+        range_sub=range_sub,
+        range_options=DASHBOARD_RANGES,
         top_performers=top_performers,
         needs_coaching=needs_coaching,
         rep_30d=rep_30d,
