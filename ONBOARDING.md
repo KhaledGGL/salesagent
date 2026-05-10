@@ -121,7 +121,14 @@ sed -i 's/sales_api/colt_api/g; s/sales_worker/colt_worker/g; s/sales_beat/colt_
 # Caddy reaches each client's API through the `web` docker network by container
 # name, so removing the host port bindings is harmless. (You can SSH-tunnel if
 # you ever need direct host access for debugging.)
-sed -i '/127\.0\.0\.1:8000:8000/d; /127\.0\.0\.1:6379:6379/d; /127\.0\.0\.1:5555:5555/d' docker-compose.yml
+#
+# Delete the entire `ports:` block (key + comments + binding line) per service.
+# A range delete (`addr1,addr2 d`) is required — deleting only the binding line
+# leaves `ports:` dangling above an empty list, which Compose rejects with
+# `services.<svc>.ports must be a array`.
+sed -i '/^    ports:$/,/127\.0\.0\.1:8000:8000/d' docker-compose.yml
+sed -i '/^    ports:$/,/127\.0\.0\.1:6379:6379/d' docker-compose.yml
+sed -i '/^    ports:$/,/127\.0\.0\.1:5555:5555/d' docker-compose.yml
 
 # 3d. Create their .env from the template
 cp .env.example .env

@@ -164,8 +164,14 @@ cd /srv/<slug>
 # Rename containers so they never collide with future tenants on the same host
 sed -i 's/sales_api/<slug>_api/g; s/sales_worker/<slug>_worker/g; s/sales_beat/<slug>_beat/g; s/sales_redis/<slug>_redis/g; s/sales_flower/<slug>_flower/g' docker-compose.yml
 
-# Free host ports — Caddy reaches the API over the `web` network by container name
-sed -i '/127\.0\.0\.1:8000:8000/d; /127\.0\.0\.1:6379:6379/d; /127\.0\.0\.1:5555:5555/d' docker-compose.yml
+# Free host ports — Caddy reaches the API over the `web` network by container name.
+# Delete the entire `ports:` block (key + comments + binding line) for each
+# service that had one. A range delete (`addr1,addr2 d`) is required — deleting
+# only the binding line leaves `ports:` dangling above an empty list, which
+# Compose rejects with `services.api.ports must be a array`.
+sed -i '/^    ports:$/,/127\.0\.0\.1:8000:8000/d' docker-compose.yml
+sed -i '/^    ports:$/,/127\.0\.0\.1:6379:6379/d' docker-compose.yml
+sed -i '/^    ports:$/,/127\.0\.0\.1:5555:5555/d' docker-compose.yml
 
 cp .env.example .env
 nano .env
