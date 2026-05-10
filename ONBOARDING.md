@@ -122,11 +122,11 @@ sed -i 's/sales_api/colt_api/g; s/sales_worker/colt_worker/g; s/sales_beat/colt_
 # name, so removing the host port bindings is harmless. (You can SSH-tunnel if
 # you ever need direct host access for debugging.)
 #
-# Single sed with a generic addr2 (`/127\.0\.0\.1/`) — re-enters the delete
-# range on each `    ports:` and exits on that block's binding line. Deleting
-# only the binding line would leave `ports:` dangling above an empty list,
-# which Compose rejects with `services.<svc>.ports must be a array`.
-sed -i '/^    ports:$/,/127\.0\.0\.1/d' docker-compose.yml
+# Single sed: enters delete mode at each `    ports:` and exits at that block's
+# binding line. The addr2 anchors on `      - "127.0.0.1:` so it only matches
+# actual binding lines, never prose comments that mention 127.0.0.1 (the api
+# block's comments do — that's a real footgun).
+sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' docker-compose.yml
 
 # 3d. Create their .env from the template
 cp .env.example .env

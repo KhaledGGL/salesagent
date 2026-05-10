@@ -165,12 +165,11 @@ cd /srv/<slug>
 sed -i 's/sales_api/<slug>_api/g; s/sales_worker/<slug>_worker/g; s/sales_beat/<slug>_beat/g; s/sales_redis/<slug>_redis/g; s/sales_flower/<slug>_flower/g' docker-compose.yml
 
 # Free host ports — Caddy reaches the API over the `web` network by container name.
-# A single sed with a generic addr2 (`/127\.0\.0\.1/`) re-enters the delete
-# range on each `    ports:` and exits on that block's binding line. Three
-# separate seds with port-specific addr2s would over-delete (invocation #1
-# would re-enter at redis's `ports:` looking for `:8000:8000` and never find
-# it, deleting to EOF).
-sed -i '/^    ports:$/,/127\.0\.0\.1/d' docker-compose.yml
+# Single sed: enters delete mode at each `    ports:` line and exits at that
+# block's binding line. The addr2 regex anchors on `      - "127.0.0.1:` so it
+# only matches actual binding lines, never prose comments that mention
+# `127.0.0.1` (the api block's comments do — that's a real footgun).
+sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' docker-compose.yml
 
 cp .env.example .env
 nano .env
