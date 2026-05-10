@@ -5,14 +5,26 @@
 > using path-based Caddy routing so each client gets their own
 > `https://api.<DOMAIN>/<client-slug>/*` URL.
 >
+> **Two routing models exist for this project.** This file documents the
+> **shared host + path prefix** model (Model 2) — every client lives under
+> the same `api.<DOMAIN>` hostname behind a `/<slug>/` prefix.
+>
+> If the new client should instead get **their own dedicated hostname**
+> (e.g. `analyzer.acme.com` with no path prefix), follow
+> [`NEW_VPS_ONBOARDING.md`](./NEW_VPS_ONBOARDING.md) instead — it walks
+> through the per-client hostname model (Model 1). The `infra/caddy/Caddyfile`
+> ships templates for both, and you can mix models on the same host.
+>
 > **Companion docs:**
+> - [`NEW_VPS_ONBOARDING.md`](./NEW_VPS_ONBOARDING.md) — brand-new VPS + brand-new Supabase walkthrough
 > - [`INSTALL.md`](./INSTALL.md) — first-time deployment of the system itself
 > - [`STATUS.md`](./STATUS.md) — current build state
 > - [`CLAUDE.md`](./CLAUDE.md) — project conventions
 > - [`infra/caddy/README.md`](./infra/caddy/README.md) — Caddy host setup
 >
-> Read INSTALL first if the VPS doesn't already have Caddy + at least one
-> client running. This file picks up *after* that's done.
+> Read NEW_VPS_ONBOARDING first if the host doesn't yet exist. Read this
+> file when you're adding another client to a VPS that already runs Caddy
+> + at least one client.
 
 ---
 

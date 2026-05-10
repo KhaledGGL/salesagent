@@ -1,73 +1,109 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# Caddy reverse proxy — multi-agent path-based routing
+# Caddy reverse proxy — multi-tenant routing
 #
-# This Caddyfile fronts every backend agent on the same VPS under a single
-# hostname (api.<DOMAIN>) with path-based routing. Each agent gets a path
-# prefix; Caddy strips the prefix before forwarding so the backend apps
-# don't need to know about it.
+# Two routing models are supported in this file. Pick whichever fits the
+# client; you can mix freely on the same host.
 #
-# DNS: point an A record for api.<DOMAIN> at this VPS's public IP.
-# TLS: Caddy automatically obtains and renews Let's Encrypt certs.
+#   1. Per-client hostname (RECOMMENDED for new clients)
+#      Each client brings their own domain (e.g. `analyzer.acme.com`).
+#      Caddy obtains a separate Let's Encrypt cert per host automatically.
+#      No URL_PREFIX in the app's `.env`. Cleanest URLs.
 #
-# To add a new agent:
+#   2. Shared host with path prefix (legacy / shared infra)
+#      All clients live under `api.<DOMAIN>/<slug>/*`. One cert covers
+#      everything, but every client must set `URL_PREFIX=/<slug>` in
+#      their app `.env` so internal links resolve.
+#
+# DNS:
+#   Per-host model → A record for the client's chosen hostname → VPS IP
+#   Shared model   → A record for `api.<DOMAIN>` → VPS IP
+#
+# To add a new tenant:
 #   1. Stand it up in its own docker-compose project, joined to the
 #      `web` external network (see infra/caddy/README.md)
-#   2. Add a `handle_path` block below pointing at its container name + port
-#   3. `docker compose -f infra/caddy/docker-compose.yml restart caddy`
+#   2. Add a host block (per-host) OR a `handle_path` block (shared)
+#   3. `docker compose -f /srv/caddy/docker-compose.yml exec caddy \
+#         caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile`
 # ─────────────────────────────────────────────────────────────────────────────
 {
 	# Global options
 	email {$ACME_EMAIL}
 
-	# Comment the next two lines OUT for real production. They use the
-	# Let's Encrypt staging environment so you don't burn the production
-	# rate limit during DNS/setup testing.
+	# Uncomment to use the Let's Encrypt staging environment while
+	# debugging DNS / cert issuance. Avoids burning the production rate limit.
 	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
 }
 
-# ─── Public API hostname ─────────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════════════════
+# MODEL 1 — Per-client hostname (recommended)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Copy the `EXAMPLE_CLIENT_HOSTNAME` block per tenant. Each block:
+#   - matches a single hostname (no `api.{$DOMAIN}` wrapper)
+#   - applies security headers
+#   - basicauth-gates the `/ui` dashboard (3 leadership users share creds)
+#   - leaves webhooks + health endpoints unauthenticated (URL is the secret)
+#
+# Generate the basicauth hash with:
+#   docker compose exec caddy caddy hash-password
+#
+# In each client's app `.env`, leave `URL_PREFIX=` blank so the app serves
+# from `/`. The webhook URL becomes:
+#   https://<client-hostname>/webhooks/ghl/transcript-ready
+# The dashboard becomes:
+#   https://<client-hostname>/ui/
+
+# ─── Acme Inc. — slug=acme — example, uncomment + adapt ─────────────────────
+# analyzer.acme.com {
+#     header {
+#         Strict-Transport-Security "max-age=31536000; includeSubDomains"
+#         X-Content-Type-Options "nosniff"
+#         X-Frame-Options "DENY"
+#         Referrer-Policy "strict-origin-when-cross-origin"
+#         -Server
+#     }
+#
+#     @ui path /ui /ui/*
+#     handle @ui {
+#         basicauth {
+#             acme $2a$14$REPLACE_WITH_CADDY_HASH_PASSWORD_OUTPUT
+#         }
+#         reverse_proxy acme_api:8000 {
+#             header_up X-Real-IP {remote_host}
+#         }
+#     }
+#
+#     reverse_proxy acme_api:8000 {
+#         header_up X-Real-IP {remote_host}
+#     }
+# }
+
+# ═══════════════════════════════════════════════════════════════════════════
+# MODEL 2 — Shared host with path prefix (legacy / first-tenant infra)
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# Kept for the existing `salesgrader` deployment under
+# `api.<DOMAIN>/salesgrader/*`. New clients should use Model 1 above.
+
 api.{$DOMAIN} {
-	# Security headers for all responses
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		# Hide Caddy's identity
 		-Server
 	}
 
 	# ── Sales Call Analyzer ──────────────────────────────────────────────
-	# Webhook URL given to GHL workflow:
-	#   https://api.<DOMAIN>/salesgrader/webhooks/ghl/transcript-ready
-	# Health check from outside:
-	#   https://api.<DOMAIN>/salesgrader/health/ready
+	# Webhook URL: https://api.<DOMAIN>/salesgrader/webhooks/ghl/transcript-ready
+	# Health:      https://api.<DOMAIN>/salesgrader/health/ready
 	handle_path /salesgrader/* {
-		# Caddy already forwards X-Forwarded-For and X-Forwarded-Proto by
-		# default. We only set X-Real-IP explicitly for backends that look
-		# for that specific header.
 		reverse_proxy sales_api:8000 {
 			header_up X-Real-IP {remote_host}
 		}
 	}
 
-	# ── Future agents — uncomment and adapt as you add them ──────────────
-	#
-	# handle_path /sdr/* {
-	#     reverse_proxy sdr_api:8000 {
-	#         header_up X-Real-IP {remote_host}
-	#     }
-	# }
-	#
-	# handle_path /sheets/* {
-	#     reverse_proxy sheets_api:8000 {
-	#         header_up X-Real-IP {remote_host}
-	#     }
-	# }
-
 	# ── Default response at the root path ────────────────────────────────
-	# Hitting api.<DOMAIN>/ directly returns a small OK so you can verify
-	# Caddy is alive without authenticating into any specific agent.
 	handle {
 		respond "Caddy reverse proxy OK. Use /<agent>/<path> to reach a service." 200
 	}

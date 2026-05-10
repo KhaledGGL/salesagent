@@ -1,19 +1,30 @@
-# Caddy reverse proxy — multi-agent VPS layout
+# Caddy reverse proxy — multi-tenant VPS layout
 
 This directory holds a standalone Caddy reverse proxy that fronts every
-agent running on the same VPS, with **path-based routing under a single
-hostname** (`api.<DOMAIN>`).
+tenant running on the same VPS. Two routing models are supported and
+can be mixed in the same `Caddyfile`:
+
+1. **Per-client hostname (recommended for new clients).** Each tenant
+   brings their own domain (`analyzer.acme.com`, `sales.client2.io`, …).
+   Caddy obtains a separate Let's Encrypt cert per host. No URL prefix
+   in the app — it serves from `/`. Cleanest URLs and full isolation.
+   See [`NEW_VPS_ONBOARDING.md`](../../NEW_VPS_ONBOARDING.md) for the
+   end-to-end walkthrough.
+
+2. **Shared host with path prefix (legacy).** All tenants live under
+   `api.<DOMAIN>/<slug>/*`. One cert covers everything; each app must
+   set `URL_PREFIX=/<slug>` so internal links resolve. Documented in
+   the rest of this README and in [`ONBOARDING.md`](../../ONBOARDING.md).
 
 ## What it solves
 
-- **One hostname for everything.** Instead of `salesgrader.example.com`,
-  `sdr.example.com`, etc., everything lives at `api.example.com/<agent>`.
-- **One TLS cert** managed automatically by Let's Encrypt.
-- **Backend isolation.** Each agent stays in its own Docker Compose
+- **Backend isolation.** Each tenant stays in its own Docker Compose
   project on its own private network. Caddy is the only thing that can
-  reach the agents publicly.
-- **Easy to add agents.** New agent → new `handle_path` block in the
-  `Caddyfile` → `docker compose restart caddy`.
+  reach the apps publicly.
+- **Auto TLS** via Let's Encrypt — per host in Model 1, one wildcard-style
+  cert in Model 2.
+- **Easy to add tenants.** New tenant → new host block (Model 1) or
+  `handle_path` block (Model 2) in the `Caddyfile` → reload Caddy.
 
 ## Layout
 

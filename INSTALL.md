@@ -4,6 +4,24 @@
 > comfort with the Linux command line, Docker, and basic networking.
 > No prior knowledge of this codebase required.
 
+> **Two routing models exist for this project — pick before you start:**
+>
+> 1. **Per-client hostname (recommended for new deployments)** — each
+>    tenant brings their own domain (`analyzer.acme.com`,
+>    `sales.client2.io`). Caddy issues a separate Let's Encrypt cert per
+>    host. No URL prefix in `.env`.
+>    👉 Use [`NEW_VPS_ONBOARDING.md`](./NEW_VPS_ONBOARDING.md) for the
+>    end-to-end walkthrough; this file (INSTALL.md) is mostly
+>    interchangeable but the URLs below assume Model 2.
+>
+> 2. **Shared host with path prefix (this document's default)** — all
+>    tenants live under `api.<DOMAIN>/<slug>/*`. One cert covers
+>    everything; each app sets `URL_PREFIX=/<slug>`. Used by the
+>    existing `salesgrader` deployment.
+>
+> The `infra/caddy/Caddyfile` ships templates for both. You can mix
+> models on the same host.
+
 This guide walks you from zero to a running production system that
 ingests sales call transcripts, scores them with Claude (NEPQ/AHM
 methodology), and posts to Slack:
