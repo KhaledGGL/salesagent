@@ -109,6 +109,32 @@ docker compose logs -f caddy
 # (Step 8). Ctrl+C once the container is healthy.
 ```
 
+**Verify Caddy is publishing to host ports 80/443** (skipping this is how you
+end up with `curl: (7) Failed to connect ... port 443` later):
+
+```bash
+docker ps --filter name=caddy
+# PORTS column MUST show `0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp, ...`
+# If it shows just `80/tcp, 443/tcp` (no `0.0.0.0:->`), the ports aren't
+# published — `/srv/caddy/docker-compose.yml` is missing its `ports:` block.
+
+ss -tlnp | grep -E ':80 |:443 '
+# Should list two listeners. Empty output = nothing is listening on the host.
+```
+
+If ports aren't bound, restore `/srv/caddy/docker-compose.yml` from the repo
+template and restart:
+
+```bash
+cp /srv/salesagent-template/infra/caddy/docker-compose.yml /srv/caddy/docker-compose.yml
+cd /srv/caddy && docker compose down && docker compose up -d
+```
+
+> ⚠️ **Do NOT run the port-stripping `sed` from Step 7 inside `/srv/caddy/`.**
+> That `sed` deletes `ports:` blocks; on the Caddy compose file it would
+> remove the host bindings and Caddy would silently stop being reachable
+> from the public internet. The `sed` only belongs in `/srv/<slug>/`.
+
 ---
 
 ## 4. Provision the Supabase project
@@ -355,6 +381,12 @@ Share with the client:
 - Slack channels: `#sales-scorecards`, `#sales-reports`
 - Weekly cadence: Mon 8:00 — sales report, coaching lesson, marketing intel
 
+> ⚠️ **The basicauth password is not recoverable.** The hash in the
+> Caddyfile is one-way. Store the plaintext in your password manager
+> when you generate it; if it's lost, regenerate with
+> `docker compose exec caddy caddy hash-password`, replace the hash
+> in the Caddyfile, and reload Caddy.
+
 ---
 
 ## 12. Production hardening (do before real traffic)
@@ -405,3 +437,18 @@ Once Caddy is up, every additional tenant is:
 
 No changes to existing tenants. They each have their own hostname, cert,
 container set, Supabase project, and Slack bot — full isolation.
+
+---
+
+## Common gotchas (lessons from real onboardings)
+
+| Symptom | Root cause | Fix |
+|---|---|---|
+| `validating /srv/<slug>/docker-compose.yml: services.api.ports must be a array` | The port-stripping `sed` deleted only the binding line, leaving `ports:` dangling above an empty list. | Use the **range-delete** sed in Step 7: `sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' docker-compose.yml`. The addr2 anchors on the literal binding shape so prose comments mentioning `127.0.0.1` don't confuse it. If already broken, `git checkout -- docker-compose.yml` and re-run the corrected sed. |
+| Container starts but uvicorn errors `Got unexpected extra arguments (- 127.0.0.1:8000:8000)` | A previous addr2 regex was too loose (`/127\.0\.0\.1/`) and matched a comment in api's `ports:` block, leaving the binding line orphaned underneath `command:`. Compose then parsed the orphan as a list item and uvicorn received it as argv. | Same fix as above — use the anchored addr2 from Step 7. |
+| `curl https://<hostname>/...` → `Failed to connect ... port 443` even though Caddy container is `Up` | Host ports 80/443 aren't bound. `docker ps` shows `80/tcp, 443/tcp` without the `0.0.0.0:->` prefix — the `ports:` block in `/srv/caddy/docker-compose.yml` is missing or was stripped. | `cp /srv/salesagent-template/infra/caddy/docker-compose.yml /srv/caddy/docker-compose.yml && cd /srv/caddy && docker compose down && docker compose up -d`. Verify with `ss -tlnp \| grep -E ':80 \|:443 '`. |
+| `/health/ready` returns 200 over HTTP from inside the container but DNS-then-HTTPS fails | DNS A record not yet propagated, or Caddyfile has no host block for that hostname. | `dig <hostname> +short` must return `<VPS_IP>`. Then add the host block in Step 8 and reload Caddy. |
+| Lost basicauth password for `/ui/` | bcrypt is one-way — the hash can't be reversed. | Regenerate via `docker compose exec caddy caddy hash-password`, replace the hash in the Caddyfile, reload Caddy. Save the plaintext in a password manager this time. |
+| Cert issuance fails with `unauthorized` or `connection refused` | Port 80 blocked by firewall, or DNS not propagated. | `ufw status` (must allow 80/tcp), `dig <hostname> +short` (must return VPS IP). Re-trigger by reloading Caddy after the underlying issue is fixed. |
+| Webhook returns 422 | Pydantic rejected the payload — usually a missing required field or `call_transcript` shorter than 50 chars. | Check `docker compose logs api` for the validation detail. |
+| Scorecard never lands in Slack despite worker logs showing scoring success | Bot wasn't invited to `#sales-scorecards` (or channel name mistyped — must NOT have a `#` prefix in `.env`). | `/invite @<botname>` from the channel; verify `SLACK_SCORECARD_CHANNEL=sales-scorecards` (no `#`). |

@@ -115,6 +115,11 @@ cd colt
 # 3b. Rename containers so they don't collide with the existing client.
 # (docker-compose.yml hard-codes container_name: sales_api, sales_worker, etc.
 # Two stacks using the same container names will fail to start.)
+#
+# ⚠️ ONLY run these seds inside `/srv/<slug>/`. Running them in `/srv/caddy/`
+# would mangle the Caddy compose file — for ports specifically, that would
+# silently stop Caddy from binding host ports 80/443 and the public URL would
+# go offline.
 sed -i 's/sales_api/colt_api/g; s/sales_worker/colt_worker/g; s/sales_beat/colt_beat/g; s/sales_redis/colt_redis/g; s/sales_flower/colt_flower/g' docker-compose.yml
 
 # 3c. Free the host ports — port 8000/6379/5555 are already taken by client #1.
@@ -231,6 +236,10 @@ docker compose exec caddy caddy hash-password
 # Copy the entire $2a$... string into the basicauth line above
 ```
 
+> ⚠️ **The bcrypt hash is one-way.** If the password is ever lost,
+> regenerate, replace the hash in the Caddyfile, and reload Caddy —
+> there's no way to recover the plaintext from the hash itself.
+
 The username (`colt` in the example) can be anything — all three leadership
 users share the same credentials. If you ever need per-user accounts, you'd
 swap to Supabase Auth, but for read-only management dashboards shared
@@ -243,6 +252,16 @@ cd /srv/caddy
 docker compose exec caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
 # If reload misbehaves, fall back to a full restart:
 docker compose restart caddy
+```
+
+Sanity check **on the VPS** that Caddy is still binding host ports
+(if you accidentally edited `/srv/caddy/docker-compose.yml`, the public
+URL goes offline):
+
+```bash
+docker ps --filter name=caddy
+# PORTS column MUST show `0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp, ...`
+ss -tlnp | grep -E ':80 |:443 '   # must list two listeners
 ```
 
 Sanity check from outside the VPS:

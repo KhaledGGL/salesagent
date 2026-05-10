@@ -48,6 +48,28 @@ The recommended layout on the VPS:
 Each agent is a separate Compose project. They communicate with Caddy
 through a **shared external Docker network** named `web`.
 
+## Caddy compose file is load-bearing — don't sed it
+
+The `docker-compose.yml` in this directory publishes host ports 80, 443,
+and 443/udp. Stripping the `ports:` block silently removes the public
+binding — `docker ps` will still show Caddy `Up` and `docker compose
+logs caddy` will be quiet, but `ss -tlnp | grep -E ':80 |:443 '` will be
+empty and every public URL on this VPS goes offline.
+
+The port-stripping `sed` documented in
+[`NEW_VPS_ONBOARDING.md`](../../NEW_VPS_ONBOARDING.md) and
+[`ONBOARDING.md`](../../ONBOARDING.md) is **only for `/srv/<slug>/`** —
+each tenant's app stack has host port bindings that collide with other
+tenants and need to be removed. Caddy is the one container on this host
+where the bindings must stay.
+
+If the file gets stripped by accident, restore it from the repo:
+
+```bash
+cp /srv/salesagent-template/infra/caddy/docker-compose.yml /srv/caddy/docker-compose.yml
+cd /srv/caddy && docker compose down && docker compose up -d
+```
+
 ## One-time host setup
 
 Run these on the VPS once, before bringing up Caddy or any agent:
