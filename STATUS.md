@@ -1,11 +1,13 @@
-# Project Status — Sales Call Analyzer
+# Project Status — Sales Call Analyzer (+ Marketing Analyzer)
 
 **Last updated:** 2026-05-17
-**Current phase:** v0.3 — single ingestion model, GHL-API-free, UTM-driven attribution.
+**Current phase:** v0.4 — modular monorepo (core/ + sales/ + marketing/);
+Phase 0 refactor complete; Marketing Analyzer Phase 1 build pending.
 
-> **Milestone 2 (Marketing Analyzer) — design complete, build not started.**
-> See [`MARKETING_ANALYZER_PLAN.md`](./MARKETING_ANALYZER_PLAN.md) for the
-> locked architectural decisions, build phases, and resume instructions.
+> **Milestone 2 (Marketing Analyzer) — Phase 0 refactor in PR, Phase 1 pending.**
+> Design: [`MARKETING_ANALYZER_PLAN.md`](./MARKETING_ANALYZER_PLAN.md)
+> Phase 0 execution plan: [`PHASE_0_REFACTOR_PLAN.md`](./PHASE_0_REFACTOR_PLAN.md)
+> Phase 1 build starts after Phase 0 ships to both live VPSes.
 
 > **Deploying this for the first time?** Read [`INSTALL.md`](./INSTALL.md)
 > for a complete step-by-step guide. This file is for tracking *what's

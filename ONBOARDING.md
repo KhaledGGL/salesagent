@@ -120,7 +120,7 @@ cd colt
 # would mangle the Caddy compose file — for ports specifically, that would
 # silently stop Caddy from binding host ports 80/443 and the public URL would
 # go offline.
-sed -i 's/sales_api/colt_api/g; s/sales_worker/colt_worker/g; s/sales_beat/colt_beat/g; s/sales_redis/colt_redis/g; s/sales_flower/colt_flower/g' docker-compose.yml
+sed -i 's/sales_api/colt_api/g; s/sales_worker/colt_worker/g; s/sales_beat/colt_beat/g; s/sales_redis/colt_redis/g; s/sales_flower/colt_flower/g' deploy/compose.sales-only.yml
 
 # 3c. Free the host ports — port 8000/6379/5555 are already taken by client #1.
 # Caddy reaches each client's API through the `web` docker network by container
@@ -131,7 +131,7 @@ sed -i 's/sales_api/colt_api/g; s/sales_worker/colt_worker/g; s/sales_beat/colt_
 # binding line. The addr2 anchors on `      - "127.0.0.1:` so it only matches
 # actual binding lines, never prose comments that mention 127.0.0.1 (the api
 # block's comments do — that's a real footgun).
-sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' docker-compose.yml
+sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' deploy/compose.sales-only.yml
 
 # 3d. Create their .env from the template
 cp .env.example .env
@@ -366,29 +366,44 @@ the full chain end-to-end.
 
 ## Going forward — code update workflow per client
 
-When you push improvements to `master` on GitHub:
+Two update paths exist after the Phase 0 modular-monorepo refactor:
+
+**1. Routine code updates (automated via Watchtower).** When you push
+to `master`, GitHub Actions builds `ghcr.io/khaledggl/gogrowlabs-sales:stable`
+(and `:marketing` if applicable). Watchtower on each VPS pulls the new
+`:stable` image on its nightly schedule and rolls the containers. No
+SSH needed.
+
+To force a roll right now on a specific host:
+```bash
+ssh root@<vps-ip>
+docker exec watchtower /watchtower --run-once --cleanup
+```
+
+**2. Manual updates (compose / env / migration changes).** Edits to
+deploy/compose.*.yml, .env, or sales/migrations/*.sql require SSH:
 
 ```bash
 ssh root@2.24.198.69
 
-# Update each client directory
+# Update each client directory on this VPS
 for slug in salesagent colt; do
   cd /srv/$slug
   git stash                              # set aside the per-client sed edits
   git pull origin master
   git stash pop                          # re-apply the sed edits
-  docker compose up -d --build
+  docker compose -f deploy/compose.sales-only.yml up -d --build
 done
 ```
 
 The `git stash` dance is needed because Step 3b/3c modified
-`docker-compose.yml` in place (sed). On a fresh `git pull` those edits
-appear as uncommitted local changes that conflict with upstream changes
-to the same file.
+`deploy/compose.sales-only.yml` in place (sed). On a fresh `git pull`
+those edits appear as uncommitted local changes that conflict with
+upstream changes to the same file.
 
-**Cleaner long-term option:** refactor `docker-compose.yml` to read
-`${COMPOSE_PROJECT_NAME}` from `.env` for container names instead of
-hard-coding `sales_*`. Then each client's `.env` sets
+**Cleaner long-term option:** refactor `deploy/compose.sales-only.yml`
+to read `${COMPOSE_PROJECT_NAME}` from `.env` for container names
+instead of hard-coding `sales_*`. Then each client's `.env` sets
 `COMPOSE_PROJECT_NAME=colt` and Step 3b disappears entirely. Worth doing
 once you've onboarded 2–3 clients and the pattern is proven.
 
