@@ -1,7 +1,11 @@
 # Project Status — Sales Call Analyzer
 
-**Last updated:** 2026-05-04
+**Last updated:** 2026-05-17
 **Current phase:** v0.3 — single ingestion model, GHL-API-free, UTM-driven attribution.
+
+> **Milestone 2 (Marketing Analyzer) — design complete, build not started.**
+> See [`MARKETING_ANALYZER_PLAN.md`](./MARKETING_ANALYZER_PLAN.md) for the
+> locked architectural decisions, build phases, and resume instructions.
 
 > **Deploying this for the first time?** Read [`INSTALL.md`](./INSTALL.md)
 > for a complete step-by-step guide. This file is for tracking *what's
