@@ -3,14 +3,14 @@
 
 services:
   api:
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn sales.app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - .:/app
     environment:
       - APP_ENV=development
 
   worker:
-    command: celery -A app.workers.celery_app worker --loglevel=debug --concurrency=2
+    command: celery -A sales.app.workers.celery_app worker --loglevel=debug --concurrency=2
     volumes:
       - .:/app
     environment:

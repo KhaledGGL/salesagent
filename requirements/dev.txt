@@ -1,0 +1,6 @@
+# Combined dev environment: both products' runtime deps + test tooling.
+-r sales.txt
+-r marketing.txt
+
+pytest==8.3.3
+pytest-mock==3.14.0

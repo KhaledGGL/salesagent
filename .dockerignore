@@ -17,5 +17,7 @@ venv
 *.md
 !CLAUDE.md
 docker-compose.yml
-Dockerfile
+docker-compose.*.yml
+**/Dockerfile
+deploy/
 .dockerignore

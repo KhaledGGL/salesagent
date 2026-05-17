@@ -10,9 +10,11 @@
 
 services:
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: sales/Dockerfile
     container_name: sales_api
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    command: uvicorn sales.app.main:app --host 0.0.0.0 --port 8000 --workers 2
     ports:
       # Bind to localhost only on the host so the api isn't exposed publicly
       # via port 8000 in production. Caddy reaches it through the `web`
@@ -30,9 +32,11 @@ services:
       - web
 
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: sales/Dockerfile
     container_name: sales_worker
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+    command: celery -A sales.app.workers.celery_app worker --loglevel=info --concurrency=4
     env_file:
       - .env
     depends_on:
@@ -43,9 +47,11 @@ services:
       - default
 
   beat:
-    build: .
+    build:
+      context: .
+      dockerfile: sales/Dockerfile
     container_name: sales_beat
-    command: celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    command: celery -A sales.app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
     env_file:
       - .env
     depends_on:
@@ -75,9 +81,11 @@ services:
       - default
 
   flower:
-    build: .
+    build:
+      context: .
+      dockerfile: sales/Dockerfile
     container_name: sales_flower
-    command: celery -A app.workers.celery_app flower --port=5555
+    command: celery -A sales.app.workers.celery_app flower --port=5555
     ports:
       # Localhost-only. To expose Flower publicly, route it via Caddy with
       # basicauth — see infra/caddy/README.md "Adding HTTP basic auth".

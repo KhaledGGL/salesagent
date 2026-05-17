@@ -40,7 +40,7 @@ clean:
 	docker compose down -v
 
 install-dev:
-	pip install -r requirements-dev.txt
+	pip install -r requirements/dev.txt
 
 test:
 	pytest
