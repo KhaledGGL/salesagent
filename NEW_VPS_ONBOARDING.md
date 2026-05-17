@@ -188,14 +188,14 @@ git clone https://github.com/KhaledGGL/salesagent.git <slug>
 cd /srv/<slug>
 
 # Rename containers so they never collide with future tenants on the same host
-sed -i 's/sales_api/<slug>_api/g; s/sales_worker/<slug>_worker/g; s/sales_beat/<slug>_beat/g; s/sales_redis/<slug>_redis/g; s/sales_flower/<slug>_flower/g' docker-compose.yml
+sed -i 's/sales_api/<slug>_api/g; s/sales_worker/<slug>_worker/g; s/sales_beat/<slug>_beat/g; s/sales_redis/<slug>_redis/g; s/sales_flower/<slug>_flower/g' deploy/compose.sales-only.yml
 
 # Free host ports — Caddy reaches the API over the `web` network by container name.
 # Single sed: enters delete mode at each `    ports:` line and exits at that
 # block's binding line. The addr2 regex anchors on `      - "127.0.0.1:` so it
 # only matches actual binding lines, never prose comments that mention
 # `127.0.0.1` (the api block's comments do — that's a real footgun).
-sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' docker-compose.yml
+sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' deploy/compose.sales-only.yml
 
 cp .env.example .env
 nano .env
@@ -308,7 +308,7 @@ curl -sI -u <slug>:<password> https://<CLIENT_HOSTNAME>/ui/      # 200
 
 ```bash
 # Validates Slack + Celery + Postgres + Redis (no Claude call)
-docker compose -f /srv/<slug>/docker-compose.yml exec worker python -m app.cli run-weekly-report
+docker compose -f /srv/<slug>/deploy/compose.sales-only.yml exec worker python -m sales.app.cli run-weekly-report
 # → "No scored calls this week" lands in #sales-reports
 
 # Validates Claude scoring + Slack scorecard
@@ -404,22 +404,77 @@ Share with the client:
 
 ## Update workflow going forward
 
-When you push to `master`:
+Two update paths exist:
+
+### 1. Routine code updates (automated via Watchtower)
+
+When you push to `master`, GitHub Actions builds and pushes
+`ghcr.io/khaledggl/gogrowlabs-sales:stable` (and `:marketing` if you've
+deployed that bundle). Watchtower on each VPS pulls the new `:stable`
+image on its nightly schedule and rolls the containers automatically.
+
+No SSH needed for routine updates. Verify on a VPS:
+
+```bash
+ssh root@<VPS_IP>
+docker logs watchtower --tail 50    # see what it pulled and when
+```
+
+To force a roll right now instead of waiting for the cron:
+
+```bash
+docker exec watchtower /watchtower --run-once --cleanup
+```
+
+### 2. Manual updates (when you change compose / .env / migrations)
+
+Container renames, port edits, env vars, and SQL migrations don't ride
+on the image — they require SSH:
 
 ```bash
 ssh root@<VPS_IP>
 cd /srv/<slug>
-git stash                 # preserve the sed edits to docker-compose.yml
+git stash                 # preserve the sed edits to deploy/compose.sales-only.yml
 git pull origin master
 git stash pop
-docker compose up -d --build
-docker compose restart worker beat   # required after any prompts.py change
+docker compose -f deploy/compose.sales-only.yml up -d --build
+docker compose -f deploy/compose.sales-only.yml restart worker beat
 ```
 
 The `git stash` dance is needed because Step 7 modified
-`docker-compose.yml` in place via `sed`. Long-term cleanup: refactor the
-compose file to read `${COMPOSE_PROJECT_NAME}` from `.env` for container
-names. After 2–3 clients prove the pattern, that change pays for itself.
+`deploy/compose.sales-only.yml` in place via `sed`. Long-term cleanup:
+refactor the compose file to read `${COMPOSE_PROJECT_NAME}` from `.env`
+for container names. After 2–3 clients prove the pattern, that change
+pays for itself.
+
+### Installing Watchtower on a VPS (one-time per host)
+
+Watchtower is set up once per VPS during onboarding. Skip if already
+installed — `docker ps | grep watchtower` to check.
+
+```bash
+docker run -d \
+  --name watchtower \
+  --restart unless-stopped \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v ~/.docker/config.json:/config.json:ro \
+  containrrr/watchtower \
+  --schedule "0 0 4 * * *" \
+  --cleanup \
+  --label-enable
+```
+
+Notes:
+- `--schedule "0 0 4 * * *"` runs nightly at 04:00 UTC (low traffic).
+- `--cleanup` removes the old image after a successful roll.
+- `--label-enable` means only containers labeled
+  `com.centurylinklabs.watchtower.enable=true` are managed — our compose
+  files set that label, so Watchtower won't touch random containers
+  (e.g. Caddy or other agents' redis instances).
+- `~/.docker/config.json` is mounted so Watchtower can pull from GHCR
+  with the same auth as the human operator. On a fresh VPS run
+  `docker login ghcr.io` first; use a Personal Access Token with
+  `read:packages` scope as the password.
 
 ---
 
@@ -444,7 +499,7 @@ container set, Supabase project, and Slack bot — full isolation.
 
 | Symptom | Root cause | Fix |
 |---|---|---|
-| `validating /srv/<slug>/docker-compose.yml: services.api.ports must be a array` | The port-stripping `sed` deleted only the binding line, leaving `ports:` dangling above an empty list. | Use the **range-delete** sed in Step 7: `sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' docker-compose.yml`. The addr2 anchors on the literal binding shape so prose comments mentioning `127.0.0.1` don't confuse it. If already broken, `git checkout -- docker-compose.yml` and re-run the corrected sed. |
+| `validating /srv/<slug>/deploy/compose.sales-only.yml: services.api.ports must be a array` | The port-stripping `sed` deleted only the binding line, leaving `ports:` dangling above an empty list. | Use the **range-delete** sed in Step 7: `sed -i '/^    ports:$/,/^      - "127\.0\.0\.1:/d' deploy/compose.sales-only.yml`. The addr2 anchors on the literal binding shape so prose comments mentioning `127.0.0.1` don't confuse it. If already broken, `git checkout -- deploy/compose.sales-only.yml` and re-run the corrected sed. |
 | Container starts but uvicorn errors `Got unexpected extra arguments (- 127.0.0.1:8000:8000)` | A previous addr2 regex was too loose (`/127\.0\.0\.1/`) and matched a comment in api's `ports:` block, leaving the binding line orphaned underneath `command:`. Compose then parsed the orphan as a list item and uvicorn received it as argv. | Same fix as above — use the anchored addr2 from Step 7. |
 | `curl https://<hostname>/...` → `Failed to connect ... port 443` even though Caddy container is `Up` | Host ports 80/443 aren't bound. `docker ps` shows `80/tcp, 443/tcp` without the `0.0.0.0:->` prefix — the `ports:` block in `/srv/caddy/docker-compose.yml` is missing or was stripped. | `cp /srv/salesagent-template/infra/caddy/docker-compose.yml /srv/caddy/docker-compose.yml && cd /srv/caddy && docker compose down && docker compose up -d`. Verify with `ss -tlnp \| grep -E ':80 \|:443 '`. |
 | `/health/ready` returns 200 over HTTP from inside the container but DNS-then-HTTPS fails | DNS A record not yet propagated, or Caddyfile has no host block for that hostname. | `dig <hostname> +short` must return `<VPS_IP>`. Then add the host block in Step 8 and reload Caddy. |

@@ -1,0 +1,178 @@
+# Deployment bundle: Sales + Marketing on the same VPS, sharing Redis +
+# Caddy + a single Supabase project. Closed-loop SQL view across schemas
+# is enabled here.
+#
+# Run from repo root:
+#   docker compose -f deploy/compose.combined.yml up -d
+#
+# Or via Makefile:
+#   make up BUNDLE=combined
+#
+# Resource note: combined mode runs more containers (8 total vs 5 per
+# single-bundle). Plan for ~1.5x memory vs sales-only at idle.
+
+services:
+  # ─── Sales product ─────────────────────────────────────────────
+  sales_api:
+    build:
+      context: ..
+      dockerfile: sales/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-sales:stable
+    container_name: sales_api
+    command: uvicorn sales.app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    ports:
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+      - web
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  sales_worker:
+    build:
+      context: ..
+      dockerfile: sales/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-sales:stable
+    container_name: sales_worker
+    command: celery -A sales.app.workers.celery_app worker --loglevel=info --concurrency=4 --queues=sales
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  sales_beat:
+    build:
+      context: ..
+      dockerfile: sales/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-sales:stable
+    container_name: sales_beat
+    command: celery -A sales.app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule-sales
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # ─── Marketing product ─────────────────────────────────────────
+  marketing_api:
+    build:
+      context: ..
+      dockerfile: marketing/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-marketing:stable
+    container_name: marketing_api
+    command: uvicorn marketing.app.main:app --host 0.0.0.0 --port 8001 --workers 2
+    ports:
+      - "127.0.0.1:8001:8001"
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+      - web
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  marketing_worker:
+    build:
+      context: ..
+      dockerfile: marketing/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-marketing:stable
+    container_name: marketing_worker
+    command: celery -A marketing.app.workers.celery_app worker --loglevel=info --concurrency=4 --queues=marketing
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  marketing_beat:
+    build:
+      context: ..
+      dockerfile: marketing/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-marketing:stable
+    container_name: marketing_beat
+    command: celery -A marketing.app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule-marketing
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # ─── Shared infrastructure ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: shared_redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - default
+
+  flower:
+    build:
+      context: ..
+      dockerfile: sales/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-sales:stable
+    container_name: shared_flower
+    # Flower auto-discovers all queues on the broker, so a single instance
+    # monitors both sales and marketing workers.
+    command: celery -A sales.app.workers.celery_app flower --port=5555
+    ports:
+      - "127.0.0.1:5555:5555"
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  redis_data:
+
+networks:
+  default:
+  web:
+    name: web
+    external: true

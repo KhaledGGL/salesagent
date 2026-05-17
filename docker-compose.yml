@@ -1,110 +1,17 @@
-# Production-oriented compose file.
-# For local dev with hot-reload, override with docker-compose.dev.yml:
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Backward-compat wrapper. The canonical sales-only compose file lives at
+# deploy/compose.sales-only.yml.
 #
-# In multi-agent VPS deployments, this stack is fronted by the Caddy reverse
-# proxy at infra/caddy. The api container joins the shared external `web`
-# network so Caddy can reach it; worker/beat/redis/flower stay on the
-# project's private default network. See infra/caddy/README.md for the
-# full layout.
+# This file exists so that `docker compose up -d` at the repo root continues
+# to work on already-deployed VPSes without changing their runbooks. New
+# deployments should target the bundle files directly:
+#
+#   docker compose -f deploy/compose.sales-only.yml      up -d
+#   docker compose -f deploy/compose.marketing-only.yml  up -d
+#   docker compose -f deploy/compose.combined.yml        up -d
+#
+# Requires Docker Compose 2.20+ for the `include:` directive. On older
+# Compose versions, copy the contents of deploy/compose.sales-only.yml
+# here instead (with paths adjusted: `../foo` → `./foo`).
 
-services:
-  api:
-    build: .
-    container_name: sales_api
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
-    ports:
-      # Bind to localhost only on the host so the api isn't exposed publicly
-      # via port 8000 in production. Caddy reaches it through the `web`
-      # docker network instead. Local dev still works because curl on the
-      # same host hits 127.0.0.1.
-      - "127.0.0.1:8000:8000"
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - default
-      - web
-
-  worker:
-    build: .
-    container_name: sales_worker
-    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - default
-
-  beat:
-    build: .
-    container_name: sales_beat
-    command: celery -A app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - default
-
-  redis:
-    image: redis:7-alpine
-    container_name: sales_redis
-    command: ["redis-server", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    ports:
-      # Localhost-only — never expose Redis publicly. Other agents on the
-      # same host should run their own Redis, not share this one.
-      - "127.0.0.1:6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-    restart: unless-stopped
-    networks:
-      - default
-
-  flower:
-    build: .
-    container_name: sales_flower
-    command: celery -A app.workers.celery_app flower --port=5555
-    ports:
-      # Localhost-only. To expose Flower publicly, route it via Caddy with
-      # basicauth — see infra/caddy/README.md "Adding HTTP basic auth".
-      - "127.0.0.1:5555:5555"
-    env_file:
-      - .env
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - default
-
-volumes:
-  redis_data:
-
-networks:
-  # Project-private network, auto-created. Worker / beat / redis / flower
-  # only need to talk to each other and stay here.
-  default:
-
-  # Shared external network used by Caddy (and any other host-level proxy)
-  # to reach the API. Create on the host with: docker network create web
-  #
-  # If you don't run Caddy (e.g. local dev or single-agent deployment),
-  # this is harmless — the api will still come up, just without the
-  # external network attachment.
-  web:
-    name: web
-    external: true
+include:
+  - deploy/compose.sales-only.yml

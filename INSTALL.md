@@ -4,6 +4,13 @@
 > comfort with the Linux command line, Docker, and basic networking.
 > No prior knowledge of this codebase required.
 
+> **Repo structure note (post-Phase 0):** Code lives under `core/` (shared)
+> + `sales/` (this product) + `marketing/` (the milestone-2 sibling).
+> Bundle compose files are in `deploy/`. The root `docker-compose.yml`
+> is a backward-compat `include:` wrapper for existing VPSes — new
+> deployments should target `deploy/compose.sales-only.yml` directly.
+> See `CLAUDE.md` for the full structure and conventions.
+
 > **Two routing models exist for this project — pick before you start:**
 >
 > 1. **Per-client hostname (recommended for new deployments)** — each
@@ -168,10 +175,10 @@ curl https://api.<domain>/
 2. Pick the closest region, save the database password
 3. Wait for provisioning (~2 min)
 4. Open **SQL Editor** and run these four files in order, one at a time:
-   - `001_initial.sql` — enums, tables, indexes, triggers
-   - `002_views.sql` — 30-day rolling + objection-tracking views
-   - `003_weekly_views.sql` — weekly report views
-   - `004_coaching_marketing_views.sql` — coaching lesson + marketing intel views
+   - `sales/migrations/001_initial.sql` — enums, tables, indexes, triggers
+   - `sales/migrations/002_views.sql` — 30-day rolling + objection-tracking views
+   - `sales/migrations/003_weekly_views.sql` — weekly report views
+   - `sales/migrations/004_coaching_marketing_views.sql` — coaching lesson + marketing intel views
 5. Verify:
    ```sql
    select table_name, table_type
@@ -320,7 +327,7 @@ curl https://api.<domain>/salesgrader/health/ready
 **Test the weekly report (validates Slack + Celery + Postgres + Redis):**
 
 ```bash
-docker compose exec worker python -m app.cli run-weekly-report
+docker compose exec worker python -m sales.app.cli run-weekly-report
 ```
 
 Should post a "No scored calls this week" message to `#sales-reports`.
@@ -352,8 +359,8 @@ Check `#sales-scorecards` in Slack — a scorecard should appear within 15-30 se
 ```bash
 # These need call data from the previous week. Backdate the test call's
 # called_at in Supabase to last week if needed, then run:
-docker compose exec worker python -m app.cli run-coaching-lesson
-docker compose exec worker python -m app.cli run-marketing-intel
+docker compose exec worker python -m sales.app.cli run-coaching-lesson
+docker compose exec worker python -m sales.app.cli run-marketing-intel
 ```
 
 ### 3.11 Connect GHL workflow
@@ -399,9 +406,9 @@ Three reports fire automatically every Monday (configurable via env vars):
 **Manual trigger anytime:**
 
 ```bash
-docker compose exec worker python -m app.cli run-weekly-report
-docker compose exec worker python -m app.cli run-coaching-lesson
-docker compose exec worker python -m app.cli run-marketing-intel
+docker compose exec worker python -m sales.app.cli run-weekly-report
+docker compose exec worker python -m sales.app.cli run-coaching-lesson
+docker compose exec worker python -m sales.app.cli run-marketing-intel
 ```
 
 ---
@@ -431,7 +438,7 @@ Leave blank for generic sales analysis that works across any industry.
 
 ### Scoring rubric
 
-The Claude scoring prompt is in `app/core/prompts.py`. You can change:
+The Claude scoring prompt is in `sales/app/core/prompts.py`. You can change:
 - Scoring band descriptions (what counts as a 7 vs a 9)
 - Therapist-mode detection rules
 - Objection type classifications
@@ -475,8 +482,8 @@ docker compose logs -f                        # everything at once
 ### Replaying a failed call
 
 ```bash
-docker compose exec worker python -m app.cli replay-scoring <call-uuid>
-docker compose exec worker python -m app.cli replay-notification <call-uuid>
+docker compose exec worker python -m sales.app.cli replay-scoring <call-uuid>
+docker compose exec worker python -m sales.app.cli replay-notification <call-uuid>
 ```
 
 ### Updating the code
@@ -524,7 +531,7 @@ in the webhook config UI.
 
 ### Custom adapter (if CRM can't customize webhook body)
 
-Add a new route in `app/webhooks/ghl.py` that translates your CRM's
+Add a new route in `sales/app/webhooks/ghl.py` that translates your CRM's
 payload into the canonical shape, then calls the same downstream logic.
 See the existing `ghl_transcript_ready` function as a template.
 
@@ -537,7 +544,7 @@ If your CRM only provides audio, not text, add a transcription step.
 **Recommended: Deepgram** (~$0.004/min, excellent speaker diarization)
 
 1. Add `deepgram-sdk` to `requirements.txt`
-2. Create `app/services/transcription.py` with a `transcribe_url()` function
+2. Create `sales/app/services/transcription.py` with a `transcribe_url()` function
 3. Add a step that runs transcription before the `score_call` task (e.g.
    a new Celery task fired from the webhook when no transcript is present)
 4. Add `DEEPGRAM_API_KEY` to config and `.env`
@@ -551,13 +558,13 @@ Total work: ~30-60 minutes.
 ## Appendix C: Replacing Slack with another channel
 
 The Slack notifier is isolated in:
-- `app/services/slack_client.py` — API client
-- `app/core/slack_blocks.py`, `report_blocks.py`, `coaching_blocks.py`, `marketing_blocks.py` — formatters
+- `sales/app/services/slack_client.py` — API client
+- `sales/app/core/slack_blocks.py`, `report_blocks.py`, `coaching_blocks.py`, `marketing_blocks.py` — formatters
 
 To replace with Discord, Teams, or email:
 1. Create a new notifier module with the same `post_message()` signature
 2. Create formatters in your destination's native format
-3. Update imports in `app/workers/tasks.py`
+3. Update imports in `sales/app/workers/tasks.py`
 
 ---
 

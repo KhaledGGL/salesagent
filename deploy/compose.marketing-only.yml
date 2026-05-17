@@ -1,0 +1,118 @@
+# Deployment bundle: Marketing Analyzer alone (no sales).
+#
+# Run from repo root:
+#   docker compose -f deploy/compose.marketing-only.yml up -d
+#
+# Or via Makefile:
+#   make up BUNDLE=marketing-only
+#
+# Mirrors compose.sales-only.yml — same Caddy/web-network pattern,
+# container naming uses marketing_ prefix to avoid collision on
+# shared VPSes. Skeleton only; the marketing/ Python package is a
+# hello-world placeholder until Phase 1 Week 1 begins.
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: marketing/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-marketing:stable
+    container_name: marketing_api
+    command: uvicorn marketing.app.main:app --host 0.0.0.0 --port 8001 --workers 2
+    ports:
+      - "127.0.0.1:8001:8001"
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+      - web
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: marketing/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-marketing:stable
+    container_name: marketing_worker
+    command: celery -A marketing.app.workers.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  beat:
+    build:
+      context: ..
+      dockerfile: marketing/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-marketing:stable
+    container_name: marketing_beat
+    command: celery -A marketing.app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  redis:
+    image: redis:7-alpine
+    container_name: marketing_redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      # Different host port from sales-only's 6379 so both bundles can
+      # coexist on the same host without colliding.
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - default
+
+  flower:
+    build:
+      context: ..
+      dockerfile: marketing/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-marketing:stable
+    container_name: marketing_flower
+    command: celery -A marketing.app.workers.celery_app flower --port=5556
+    ports:
+      - "127.0.0.1:5556:5556"
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  redis_data:
+
+networks:
+  default:
+  web:
+    name: web
+    external: true

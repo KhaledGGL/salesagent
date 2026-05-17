@@ -1,0 +1,64 @@
+name: Publish Images
+
+# Push tagged images to GHCR on every master commit. Watchtower on the
+# client VPSes auto-pulls the :stable tag on its nightly schedule.
+#
+# Manual roll-forward: re-tag a specific SHA as :stable via the GHCR UI
+# or `docker tag … && docker push …`.
+# Canary: build a feature branch as :beta to test on one VPS before
+# promoting to :stable. (Requires a separate workflow trigger or
+# manual gh CLI invocation — not auto-triggered.)
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  # Don't queue concurrent publishes for the same ref — the latest wins.
+  group: publish-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: publish ${{ matrix.product }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        product: [sales, marketing]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.product }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.product }}/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/khaledggl/gogrowlabs-${{ matrix.product }}:${{ github.sha }}
+            ghcr.io/khaledggl/gogrowlabs-${{ matrix.product }}:stable
+          cache-from: type=gha,scope=${{ matrix.product }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.product }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}

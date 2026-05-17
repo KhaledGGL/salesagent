@@ -1,0 +1,7 @@
+-r shared.txt
+
+# Marketing-specific deps will land here during Phase 1:
+#   - facebook-business (Meta Marketing API SDK)
+#   - slack-sdk (for the weekly marketing Slack report)
+#   - anthropic (for AI-synthesized insights)
+# For now the marketing skeleton uses only shared deps.
