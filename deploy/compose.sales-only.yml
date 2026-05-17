@@ -1,0 +1,137 @@
+# Canonical deployment bundle: Sales Call Analyzer alone (no marketing).
+#
+# Run from repo root:
+#   docker compose -f deploy/compose.sales-only.yml up -d
+#
+# Or via Makefile (default BUNDLE):
+#   make up
+#
+# In multi-agent VPS deployments, this stack is fronted by the Caddy reverse
+# proxy at infra/caddy. The api container joins the shared external `web`
+# network so Caddy can reach it; worker/beat/redis/flower stay on the
+# project's private default network. See infra/caddy/README.md.
+#
+# For local dev with hot-reload, layer the dev overlay:
+#   docker compose -f deploy/compose.sales-only.yml -f deploy/compose.dev.yml up
+#
+# Image tag `:stable` is what Watchtower pulls on VPSes. Local dev / CI
+# uses the `build:` block (image is built from source).
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: sales/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-sales:stable
+    container_name: sales_api
+    command: uvicorn sales.app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    ports:
+      # Bind to localhost only — Caddy reaches the api through the `web`
+      # docker network in production. Local dev still works because curl on
+      # the same host hits 127.0.0.1.
+      - "127.0.0.1:8000:8000"
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+      - web
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: sales/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-sales:stable
+    container_name: sales_worker
+    command: celery -A sales.app.workers.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  beat:
+    build:
+      context: ..
+      dockerfile: sales/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-sales:stable
+    container_name: sales_beat
+    command: celery -A sales.app.workers.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  redis:
+    image: redis:7-alpine
+    container_name: sales_redis
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      # Localhost-only — never expose Redis publicly.
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - default
+
+  flower:
+    build:
+      context: ..
+      dockerfile: sales/Dockerfile
+    image: ghcr.io/khaledggl/gogrowlabs-sales:stable
+    container_name: sales_flower
+    command: celery -A sales.app.workers.celery_app flower --port=5555
+    ports:
+      # Localhost-only. To expose Flower publicly, route it via Caddy with
+      # basicauth — see infra/caddy/README.md "Adding HTTP basic auth".
+      - "127.0.0.1:5555:5555"
+    env_file:
+      - ../.env
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - default
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  redis_data:
+
+networks:
+  # Project-private network, auto-created. Worker / beat / redis / flower
+  # only need to talk to each other and stay here.
+  default:
+
+  # Shared external network used by Caddy to reach the API. Create on the
+  # host with: docker network create web
+  #
+  # If you don't run Caddy (e.g. local dev or single-agent deployment),
+  # this is harmless — the api will still come up, just without the
+  # external network attachment.
+  web:
+    name: web
+    external: true

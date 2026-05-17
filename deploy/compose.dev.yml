@@ -1,23 +1,25 @@
 # Dev overlay: hot-reload + source mount.
-# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+# Layer over any bundle compose file, e.g.:
+#   docker compose -f deploy/compose.sales-only.yml -f deploy/compose.dev.yml up
+# Or via Makefile:  make dev
 
 services:
   api:
     command: uvicorn sales.app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
-      - .:/app
+      - ..:/app
     environment:
       - APP_ENV=development
 
   worker:
     command: celery -A sales.app.workers.celery_app worker --loglevel=debug --concurrency=2
     volumes:
-      - .:/app
+      - ..:/app
     environment:
       - APP_ENV=development
 
   beat:
     volumes:
-      - .:/app
+      - ..:/app
     environment:
       - APP_ENV=development
